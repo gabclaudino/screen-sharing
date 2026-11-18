@@ -7,6 +7,7 @@ import {
   type SignalData,
 } from '@screenshare/shared';
 import type { Session } from './auth';
+import { TypedEmitter } from './emitter';
 
 // Subconjunto de WebSocket que o cliente usa; permite injetar um falso nos testes.
 export interface WebSocketLike {
@@ -81,17 +82,13 @@ export function buildWsUrl(location: Pick<Location, 'protocol' | 'host'>): strin
   return `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`;
 }
 
-type Handler<K extends keyof SignalingEvents> = (payload: SignalingEvents[K]) => void;
-
 /**
  * Cliente de sinalização: conecta, faz `join`, envia `ping` periódico, detecta conexão morta
  * e reconecta com backoff exponencial. Classe pura (sem React) para ser testável.
  */
-export class SignalingClient {
+export class SignalingClient extends TypedEmitter<SignalingEvents> {
   private readonly opts: Required<Omit<SignalingClientOptions, 'getSharing' | 'webSocketFactory'>> &
     Pick<SignalingClientOptions, 'getSharing' | 'webSocketFactory'>;
-  // O tipo de cada Set depende da chave; `listenersFor` faz o cast num único lugar.
-  private readonly listeners = new Map<keyof SignalingEvents, Set<unknown>>();
 
   private socket: WebSocketLike | null = null;
   private currentStatus: SignalingStatus = 'idle';
@@ -101,6 +98,7 @@ export class SignalingClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(options: SignalingClientOptions) {
+    super();
     this.opts = {
       pingIntervalMs: 25_000,
       pongTimeoutMs: 10_000,
@@ -114,21 +112,6 @@ export class SignalingClient {
 
   get status(): SignalingStatus {
     return this.currentStatus;
-  }
-
-  on<K extends keyof SignalingEvents>(event: K, handler: Handler<K>): () => void {
-    const set = this.listenersFor(event);
-    set.add(handler);
-    return () => set.delete(handler);
-  }
-
-  private listenersFor<K extends keyof SignalingEvents>(event: K): Set<Handler<K>> {
-    let set = this.listeners.get(event);
-    if (!set) {
-      set = new Set();
-      this.listeners.set(event, set);
-    }
-    return set as Set<Handler<K>>;
   }
 
   connect(): void {
@@ -154,10 +137,6 @@ export class SignalingClient {
   }
 
   // -------------------------------------------------------------------------
-
-  private emit<K extends keyof SignalingEvents>(event: K, payload: SignalingEvents[K]): void {
-    this.listenersFor(event).forEach((handler) => handler(payload));
-  }
 
   private setStatus(status: SignalingStatus): void {
     if (this.currentStatus === status) return;

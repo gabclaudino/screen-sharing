@@ -150,7 +150,7 @@ Regras:
    - Mostrar na UI quantos destinatários simultâneos o upload atende (ex.: "enviando para 4 pessoas ≈ 10 Mbps").
 7. **Falhas:**
    - Monitorar `iceConnectionState`/`connectionState`. Em `failed` → `restartIce()`.
-   - Em `disconnected` prolongado (>10 s) ou `failed` persistente → **recriar** a conexão: o lado que detecta fecha a conexão atual, incrementa `gen`, cria nova `RTCPeerConnection` e envia `signal { gen, reset: true }` ao peer. Ao receber `reset` com `gen` maior que o seu, o outro lado descarta sua conexão antiga e cria uma nova com aquele `gen` (também re-adicionando seu stream local, se estiver compartilhando). Se ambos detectarem ao mesmo tempo, vence o maior `gen`; em empate, o lado **impolite** (selfId maior) prevalece e o polite recria.
+   - Em `disconnected` prolongado (>10 s) ou `failed` persistente → **recriar** a conexão: o lado que detecta fecha a conexão atual, incrementa `gen`, cria nova `RTCPeerConnection` e envia `signal { gen, reset: true }` ao peer. Ao receber `reset` com `gen` maior que o seu, o outro lado descarta sua conexão antiga e cria uma nova com aquele `gen` (também re-adicionando seu stream local, se estiver compartilhando). Se ambos detectarem ao mesmo tempo, os dois já terão recriado com o mesmo `gen`: um `reset` com `gen` igual ao atual é ignorado; com `gen` maior, o receptor recria e acompanha a geração do outro lado. Qualquer mensagem com `gen` maior que o atual tem o mesmo efeito de um `reset`.
    - Mostrar indicador por peer: `conectando`, `direto (P2P)`, `via relay (TURN)`, `falhou` (obter via `getStats()` → par de candidates selecionado, `candidateType === "relay"`).
 8. Ao receber `peer-left`, fechar e descartar a conexão correspondente e liberar o stream.
 
