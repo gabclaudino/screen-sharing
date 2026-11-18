@@ -1,16 +1,34 @@
-import { createServer } from 'node:http';
-import { PROTOCOL_VERSION } from '@screenshare/shared';
+import { createApp } from './app';
+import { ConfigError, loadConfig, type Config } from './config';
+import { createConsoleLogger } from './logger';
 
-// Placeholder da fase 1: só confirma que o workspace sobe e resolve @screenshare/shared.
-// HTTP/WS reais, config validada com zod e segurança entram na fase 3.
-const host = process.env.HOST ?? '127.0.0.1';
-const port = Number(process.env.PORT ?? 3000);
+const logger = createConsoleLogger();
 
-const server = createServer((_req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-  res.end(`screenshare server (protocol v${PROTOCOL_VERSION})\n`);
+let config: Config;
+try {
+  config = loadConfig();
+} catch (error) {
+  if (error instanceof ConfigError) {
+    console.error(error.message);
+    process.exit(1);
+  }
+  throw error;
+}
+
+const app = createApp(config, { logger });
+
+app.server.on('error', (error: NodeJS.ErrnoException) => {
+  logger.error('server_error', { code: error.code, message: error.message });
+  process.exit(1);
 });
 
-server.listen(port, host, () => {
-  console.log(`server listening on http://${host}:${port}`);
+app.server.listen(config.port, config.host, () => {
+  logger.info('listening', { host: config.host, port: config.port, env: config.nodeEnv });
 });
+
+const shutdown = (signal: string): void => {
+  logger.info('shutdown', { signal });
+  void app.close().then(() => process.exit(0));
+};
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));

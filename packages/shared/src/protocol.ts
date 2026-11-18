@@ -164,6 +164,22 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
 export type ServerMessage = z.infer<typeof serverMessageSchema>;
 
 // ---------------------------------------------------------------------------
+// API HTTP: POST /api/login
+// ---------------------------------------------------------------------------
+
+export const loginRequestSchema = z.strictObject({
+  password: z.string().min(1).max(256),
+});
+export type LoginRequest = z.infer<typeof loginRequestSchema>;
+
+export const loginResponseSchema = z.strictObject({
+  token: z.string().min(1),
+  // Epoch em milissegundos em que o token expira.
+  expiresAt: z.number().int(),
+});
+export type LoginResponse = z.infer<typeof loginResponseSchema>;
+
+// ---------------------------------------------------------------------------
 // Parsing de mensagens brutas (string JSON recebida no WebSocket)
 // ---------------------------------------------------------------------------
 
