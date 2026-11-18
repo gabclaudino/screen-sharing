@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parseServerMessage, type ServerMessage } from '@screenshare/shared';
 import { WebSocket } from 'ws';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp, type AppOptions } from './app';
 import { loadConfig } from './config';
 import { createToken } from './security';
@@ -111,8 +111,8 @@ class TestClient {
     expect(this.queue).toEqual([]);
   }
 
-  async join(room: string, name: string, extra: object = {}) {
-    this.send({ type: 'join', room, name, ...extra });
+  async join(name: string, extra: object = {}) {
+    this.send({ type: 'join', name, ...extra });
     const message = await this.next();
     if (message.type !== 'joined') throw new Error(`esperava joined, veio ${message.type}`);
     return message;
@@ -262,11 +262,12 @@ describe('servidor (HTTP)', () => {
 });
 
 describe('servidor (WebSocket)', () => {
+  // Só existe uma sala: cada teste sobe um servidor novo para não herdar participantes.
   let running: Running;
-  beforeAll(async () => {
+  beforeEach(async () => {
     running = await startApp();
   });
-  afterAll(async () => {
+  afterEach(async () => {
     await running.app.close();
   });
 
@@ -298,10 +299,10 @@ describe('servidor (WebSocket)', () => {
     );
     if (!a || !b || !c) throw new Error('conexão falhou');
 
-    const joinedA = await a.join('sala-fluxo', 'Ana');
+    const joinedA = await a.join('Ana');
     expect(joinedA.peers).toEqual([]);
 
-    const joinedB = await b.join('sala-fluxo', 'Bia');
+    const joinedB = await b.join('Bia');
     expect(joinedB.peers).toEqual([{ id: joinedA.selfId, name: 'Ana', sharing: false }]);
     const peerJoined = await a.next();
     expect(peerJoined).toEqual({
@@ -309,7 +310,7 @@ describe('servidor (WebSocket)', () => {
       peer: { id: joinedB.selfId, name: 'Bia', sharing: false },
     });
 
-    const joinedC = await c.join('sala-fluxo', 'Caio');
+    const joinedC = await c.join('Caio');
     expect(joinedC.peers.map((p) => p.name).sort()).toEqual(['Ana', 'Bia']);
     await a.next(); // peer-joined (Caio)
     await b.next();
@@ -330,7 +331,7 @@ describe('servidor (WebSocket)', () => {
     c.close();
     await a.next(); // peer-left (Caio)
     await b.next();
-    const joinedD = await d.join('sala-fluxo', 'Duda');
+    const joinedD = await d.join('Duda');
     expect(joinedD.peers.find((p) => p.name === 'Ana')?.sharing).toBe(true);
     expect(await a.next()).toMatchObject({ type: 'peer-joined', peer: { name: 'Duda' } });
 
@@ -342,17 +343,19 @@ describe('servidor (WebSocket)', () => {
     d.close();
   });
 
-  it('não repassa signal entre salas diferentes', async () => {
+  it('signal para um destino que não está na sala é ignorado em silêncio', async () => {
     const a = await TestClient.connect(running, await getToken(running));
-    const b = await TestClient.connect(running, await getToken(running));
-    const joinedA = await a.join('sala-x', 'Ana');
-    const joinedB = await b.join('sala-y', 'Bia');
-    a.send({ type: 'signal', to: joinedB.selfId, data: { gen: 0, reset: true } });
-    b.send({ type: 'signal', to: joinedA.selfId, data: { gen: 0, reset: true } });
+    const outsider = await TestClient.connect(running, await getToken(running)); // sem join
+    await a.join('Ana');
+    a.send({
+      type: 'signal',
+      to: '3f2b8c1e-5a47-4d6b-9c1a-0e7d2f4b6a10',
+      data: { gen: 0, reset: true },
+    });
     await a.expectSilence();
-    await b.expectSilence();
+    await outsider.expectSilence();
     a.close();
-    b.close();
+    outsider.close();
   });
 
   it('sala cheia → ROOM_FULL e conexão continua aberta', async () => {
@@ -361,23 +364,26 @@ describe('servidor (WebSocket)', () => {
     );
     const [c1, c2, c3, c4] = clients;
     if (!c1 || !c2 || !c3 || !c4) throw new Error('conexão falhou');
-    await c1.join('sala-cheia', 'U1');
-    await c2.join('sala-cheia', 'U2');
-    await c3.join('sala-cheia', 'U3');
+    await c1.join('U1');
+    await c2.join('U2');
+    await c3.join('U3');
 
-    c4.send({ type: 'join', room: 'sala-cheia', name: 'U4' });
+    c4.send({ type: 'join', name: 'U4' });
     const error = await c4.next();
     expect(error).toMatchObject({ type: 'error', code: 'ROOM_FULL' });
-    // ainda pode entrar em outra sala
-    expect((await c4.join('outra-sala', 'U4')).type).toBe('joined');
+    // quando alguém sai, a vaga é liberada e o mesmo cliente consegue entrar
+    c1.send({ type: 'leave' });
+    await c2.next(); // peer-left (U1)
+    await c3.next();
+    expect((await c4.join('U4')).type).toBe('joined');
     clients.forEach((c) => c.close());
   });
 
   it('nome duplicado de outro login → NAME_TAKEN', async () => {
     const a = await TestClient.connect(running, await getToken(running));
     const b = await TestClient.connect(running, await getToken(running));
-    await a.join('sala-nome', 'Ana');
-    b.send({ type: 'join', room: 'sala-nome', name: 'ana' });
+    await a.join('Ana');
+    b.send({ type: 'join', name: 'ana' });
     expect(await b.next()).toMatchObject({ type: 'error', code: 'NAME_TAKEN' });
     a.close();
     b.close();
@@ -385,8 +391,8 @@ describe('servidor (WebSocket)', () => {
 
   it('join duplicado na mesma conexão → ALREADY_JOINED', async () => {
     const a = await TestClient.connect(running, await getToken(running));
-    await a.join('sala-dup', 'Ana');
-    a.send({ type: 'join', room: 'sala-dup', name: 'Ana' });
+    await a.join('Ana');
+    a.send({ type: 'join', name: 'Ana' });
     expect(await a.next()).toMatchObject({ type: 'error', code: 'ALREADY_JOINED' });
     a.close();
   });
@@ -395,12 +401,12 @@ describe('servidor (WebSocket)', () => {
     const token = await getToken(running);
     const observer = await TestClient.connect(running, await getToken(running));
     const first = await TestClient.connect(running, token);
-    await observer.join('sala-reconexao', 'Obs');
-    const joinedFirst = await first.join('sala-reconexao', 'Ana');
+    await observer.join('Obs');
+    const joinedFirst = await first.join('Ana');
     await observer.next(); // peer-joined (Ana antiga)
 
     const second = await TestClient.connect(running, token);
-    const joinedSecond = await second.join('sala-reconexao', 'Ana');
+    const joinedSecond = await second.join('Ana');
     expect((await first.closed).code).toBe(4001);
 
     expect(await observer.next()).toEqual({ type: 'peer-left', id: joinedFirst.selfId });
@@ -413,7 +419,7 @@ describe('servidor (WebSocket)', () => {
     second.close();
   });
 
-  it('signal/sharing antes de entrar em sala → INVALID', async () => {
+  it('signal/sharing antes de entrar na sala → INVALID', async () => {
     const a = await TestClient.connect(running, await getToken(running));
     a.send({ type: 'sharing', active: true });
     expect(await a.next()).toMatchObject({ type: 'error', code: 'INVALID' });
@@ -423,15 +429,97 @@ describe('servidor (WebSocket)', () => {
   it('leave sai da sala sem fechar a conexão e permite novo join', async () => {
     const a = await TestClient.connect(running, await getToken(running));
     const b = await TestClient.connect(running, await getToken(running));
-    await a.join('sala-leave', 'Ana');
-    const joinedB = await b.join('sala-leave', 'Bia');
+    await a.join('Ana');
+    const joinedB = await b.join('Bia');
     await a.next(); // peer-joined
     b.send({ type: 'leave' });
     expect((await a.next()).type).toBe('peer-left');
     expect(joinedB.selfId).toBeTruthy();
-    expect((await b.join('sala-leave', 'Bia')).type).toBe('joined');
+    expect((await b.join('Bia')).type).toBe('joined');
     a.close();
     b.close();
+  });
+
+  it('só uma pessoa compartilha por vez: o segundo recebe SHARE_BUSY e ninguém é avisado', async () => {
+    const a = await TestClient.connect(running, await getToken(running));
+    const b = await TestClient.connect(running, await getToken(running));
+    const joinedA = await a.join('Ana');
+    await b.join('Bia');
+    await a.next(); // peer-joined (Bia)
+
+    a.send({ type: 'sharing', active: true });
+    expect(await b.next()).toEqual({ type: 'peer-sharing', id: joinedA.selfId, active: true });
+
+    b.send({ type: 'sharing', active: true });
+    expect(await b.next()).toMatchObject({ type: 'error', code: 'SHARE_BUSY' });
+    await a.expectSilence(); // Ana não recebe peer-sharing da Bia
+
+    // quando a Ana para, a vez fica livre
+    a.send({ type: 'sharing', active: false });
+    expect(await b.next()).toEqual({ type: 'peer-sharing', id: joinedA.selfId, active: false });
+    b.send({ type: 'sharing', active: true });
+    expect((await a.next()).type).toBe('peer-sharing');
+    a.close();
+    b.close();
+  });
+
+  it('quem já está compartilhando pode repetir sharing:true sem erro', async () => {
+    const a = await TestClient.connect(running, await getToken(running));
+    await a.join('Ana');
+    a.send({ type: 'sharing', active: true });
+    a.send({ type: 'sharing', active: true });
+    await a.expectSilence();
+    a.close();
+  });
+
+  it('quem sai compartilhando libera a vez para os outros', async () => {
+    const a = await TestClient.connect(running, await getToken(running));
+    const b = await TestClient.connect(running, await getToken(running));
+    await a.join('Ana');
+    await b.join('Bia');
+    await a.next(); // peer-joined
+    a.send({ type: 'sharing', active: true });
+    await b.next(); // peer-sharing
+    a.close();
+    await b.next(); // peer-left
+
+    b.send({ type: 'sharing', active: true });
+    await b.expectSilence(); // aceito, sem erro
+    expect(running.app.signaling.room.sharer()?.name).toBe('Bia');
+    b.close();
+  });
+
+  it('reentrar com sharing:true enquanto outra pessoa assumiu a vez → entra sem compartilhar e recebe SHARE_BUSY', async () => {
+    const a = await TestClient.connect(running, await getToken(running));
+    const b = await TestClient.connect(running, await getToken(running));
+    await a.join('Ana');
+    await b.join('Bia');
+    await a.next(); // peer-joined
+    b.send({ type: 'sharing', active: true });
+    await a.next(); // peer-sharing (Bia)
+
+    const returning = await TestClient.connect(running, await getToken(running));
+    const joined = await returning.join('Caio', { sharing: true });
+    expect(joined.peers.find((p) => p.name === 'Bia')?.sharing).toBe(true);
+    expect(await returning.next()).toMatchObject({ type: 'error', code: 'SHARE_BUSY' });
+    expect(running.app.signaling.room.sharer()?.name).toBe('Bia');
+    a.close();
+    b.close();
+    returning.close();
+  });
+
+  it('o mesmo login reentrando com sharing:true mantém a vez (substitui a conexão antiga)', async () => {
+    const token = await getToken(running);
+    const first = await TestClient.connect(running, token);
+    await first.join('Ana');
+    first.send({ type: 'sharing', active: true });
+    await first.expectSilence();
+
+    const second = await TestClient.connect(running, token);
+    await second.join('Ana', { sharing: true });
+    await second.expectSilence(); // sem SHARE_BUSY
+    expect(running.app.signaling.room.sharer()?.name).toBe('Ana');
+    second.close();
   });
 
   it('ping → pong', async () => {
@@ -445,7 +533,8 @@ describe('servidor (WebSocket)', () => {
     for (const bad of [
       '{nope',
       JSON.stringify({ type: 'hack' }),
-      JSON.stringify({ type: 'join', room: 'x y', name: 'Ana' }),
+      JSON.stringify({ type: 'join', room: 'outra', name: 'Ana' }), // não existe mais escolher sala
+      JSON.stringify({ type: 'join', name: '   ' }),
     ]) {
       const a = await TestClient.connect(running, await getToken(running));
       a.send(bad);
@@ -461,7 +550,7 @@ describe('servidor (WebSocket)', () => {
 
   it('mensagem acima de 64 KB fecha a conexão (1009)', async () => {
     const a = await TestClient.connect(running, await getToken(running));
-    a.send(JSON.stringify({ type: 'join', room: 'sala', name: 'a'.repeat(70 * 1024) }));
+    a.send(JSON.stringify({ type: 'join', name: 'a'.repeat(70 * 1024) }));
     expect((await a.closed).code).toBe(1009);
   });
 });
@@ -494,16 +583,16 @@ describe('servidor (limites e heartbeat)', () => {
     }
   });
 
-  it('remove a sala quando o último peer cai', async () => {
+  it('libera o participante da sala quando a conexão cai', async () => {
     const running = await startApp();
     try {
       const a = await TestClient.connect(running, await getToken(running));
-      await a.join('sala-efemera', 'Ana');
-      expect(running.app.signaling.rooms.roomCount).toBe(1);
+      await a.join('Ana');
+      expect(running.app.signaling.room.size).toBe(1);
       a.close();
       await a.closed;
       await new Promise((resolve) => setTimeout(resolve, 50));
-      expect(running.app.signaling.rooms.roomCount).toBe(0);
+      expect(running.app.signaling.room.size).toBe(0);
     } finally {
       await running.app.close();
     }

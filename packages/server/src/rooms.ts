@@ -7,7 +7,6 @@ export interface Peer {
   sharing: boolean;
   /** Sessão de login (do token) dona deste peer. */
   sid: string;
-  room: string;
 }
 
 export type JoinResult =
@@ -20,9 +19,8 @@ export const toPeerInfo = (peer: Peer): PeerInfo => ({
   sharing: peer.sharing,
 });
 
-/** Estado das salas em memória; não conhece sockets. Salas vazias são removidas. */
-export class RoomManager {
-  private readonly rooms = new Map<string, Map<string, Peer>>();
+/** A única sala do app, em memória; não conhece sockets. */
+export class Room {
   private readonly peers = new Map<string, Peer>();
   private readonly maxPeers: number;
 
@@ -30,11 +28,11 @@ export class RoomManager {
     this.maxPeers = maxPeers;
   }
 
-  join(room: string, input: { name: string; sid: string; sharing?: boolean }): JoinResult {
+  join(input: { name: string; sid: string; sharing?: boolean }): JoinResult {
     const nameKey = input.name.toLowerCase();
     let evicted: Peer | undefined;
 
-    for (const existing of this.peersInRoom(room)) {
+    for (const existing of this.peers.values()) {
       if (existing.name.toLowerCase() !== nameKey) continue;
       // Mesmo login reentrando com o mesmo nome (ex.: reconexão): substitui o antigo.
       if (existing.sid === input.sid) {
@@ -44,27 +42,18 @@ export class RoomManager {
       }
     }
 
-    const current = this.rooms.get(room)?.size ?? 0;
-    if (current - (evicted ? 1 : 0) >= this.maxPeers) {
+    if (this.peers.size - (evicted ? 1 : 0) >= this.maxPeers) {
       return { ok: false, code: 'ROOM_FULL' };
     }
+    if (evicted) this.peers.delete(evicted.id);
 
-    if (evicted) this.remove(evicted);
-
+    const others = this.all();
     const peer: Peer = {
       id: randomUUID(),
       name: input.name,
       sharing: input.sharing ?? false,
       sid: input.sid,
-      room,
     };
-    const others = this.peersInRoom(room);
-    let members = this.rooms.get(room);
-    if (!members) {
-      members = new Map();
-      this.rooms.set(room, members);
-    }
-    members.set(peer.id, peer);
     this.peers.set(peer.id, peer);
 
     return { ok: true, peer, others, ...(evicted ? { evicted } : {}) };
@@ -73,8 +62,7 @@ export class RoomManager {
   /** Idempotente: devolve `undefined` se o peer já saiu. */
   leave(peerId: string): Peer | undefined {
     const peer = this.peers.get(peerId);
-    if (!peer) return undefined;
-    this.remove(peer);
+    if (peer) this.peers.delete(peerId);
     return peer;
   }
 
@@ -88,25 +76,16 @@ export class RoomManager {
     return peer;
   }
 
-  peersInRoom(room: string): Peer[] {
-    return [...(this.rooms.get(room)?.values() ?? [])];
+  /** Quem está compartilhando, ignorando as sessões em `exceptSid` (o próprio usuário). */
+  sharer(exceptSid?: string): Peer | undefined {
+    return this.all().find((peer) => peer.sharing && peer.sid !== exceptSid);
   }
 
-  sameRoom(peerIdA: string, peerIdB: string): boolean {
-    const a = this.peers.get(peerIdA);
-    const b = this.peers.get(peerIdB);
-    return a !== undefined && b !== undefined && a.room === b.room;
+  all(): Peer[] {
+    return [...this.peers.values()];
   }
 
-  get roomCount(): number {
-    return this.rooms.size;
-  }
-
-  private remove(peer: Peer): void {
-    this.peers.delete(peer.id);
-    const members = this.rooms.get(peer.room);
-    if (!members) return;
-    members.delete(peer.id);
-    if (members.size === 0) this.rooms.delete(peer.room);
+  get size(): number {
+    return this.peers.size;
   }
 }

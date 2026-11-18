@@ -4,9 +4,9 @@
 
 ## 1. Objetivo
 
-Aplicação web para um grupo pequeno de amigos (2–5 pessoas) compartilharem a tela em salas, estilo Google Meet, com custo ~zero e hospedada no PC do dono.
+Aplicação web para um grupo pequeno de amigos (2–5 pessoas) compartilharem a tela em **uma única sala** (não há criação nem escolha de salas), estilo Google Meet, com custo ~zero e hospedada no PC do dono.
 
-**Não-objetivos (v1):** gravação, chat, login com contas, escala acima de ~6 pessoas por sala, mobile como emissor de tela (iOS não suporta `getDisplayMedia`), SFU.
+**Não-objetivos (v1):** gravação, chat, login com contas, múltiplas salas, escala acima de ~6 pessoas, mobile como emissor de tela (iOS não suporta `getDisplayMedia`), SFU.
 
 ## 2. Stack
 
@@ -62,7 +62,7 @@ A estrutura abaixo é criada **na raiz do repositório atual** (`tela-dos-guri`)
    │  └─ src/
    │     ├─ index.ts           # http + ws bootstrap
    │     ├─ config.ts          # leitura/validação de env
-   │     ├─ rooms.ts           # estado das salas em memória
+   │     ├─ rooms.ts           # a sala única, em memória
    │     ├─ signaling.ts       # handlers de mensagens
    │     ├─ ice.ts             # endpoint /api/ice
    │     ├─ static.ts          # servir estáticos do build (SPA)
@@ -93,13 +93,13 @@ Mensagens JSON sobre WebSocket, definidas em `shared/src/protocol.ts` com schema
 
 A autenticação acontece **antes** do WS: o token do `/api/login` (seção 8) é validado no upgrade. Por isso o `join` **não carrega senha**.
 
-Validação de campos: `room` casa `^[a-zA-Z0-9_-]{1,40}$` (case-sensitive); `name` tem 1–30 chars após `trim`, sem caracteres de controle.
+Validação de campos: `name` tem 1–30 chars após `trim`, sem caracteres de controle.
 
 **Cliente → Servidor**
 
 | `type` | Campos | Descrição |
 |---|---|---|
-| `join` | `room`, `name`, `sharing?: boolean` | Entra na sala (cria se não existir). `sharing` é `true` ao reentrar após reconexão enquanto ainda compartilha |
+| `join` | `name`, `sharing?: boolean` | Entra na sala única (não há campo de sala; um `join` com `room` é inválido). `sharing` é `true` ao reentrar após reconexão enquanto ainda compartilha |
 | `signal` | `to`, `data` | Repassa a um peer: `{ gen: number, description?: RTCSessionDescriptionInit, candidate?: RTCIceCandidateInit, reset?: true }`. `sdp` limitado a 32 KB e `candidate` a 2 KB (validado no schema) |
 | `sharing` | `active: boolean` | Informa que começou/parou de compartilhar |
 | `ping` | — | Heartbeat |
@@ -114,17 +114,17 @@ Validação de campos: `room` casa `^[a-zA-Z0-9_-]{1,40}$` (case-sensitive); `na
 | `peer-left` | `id` | Participante saiu |
 | `signal` | `from`, `data` | Repasse de sinalização |
 | `peer-sharing` | `id`, `active` | Estado de compartilhamento de um peer |
-| `error` | `code`, `message` | `ROOM_FULL`, `NAME_TAKEN`, `ALREADY_JOINED`, `RATE_LIMITED`, `INVALID` |
+| `error` | `code`, `message` | `ROOM_FULL`, `NAME_TAKEN`, `ALREADY_JOINED`, `SHARE_BUSY`, `RATE_LIMITED`, `INVALID` |
 | `pong` | — | Resposta ao heartbeat |
 
 Regras:
 - Senha errada ou token ausente/expirado **não** gera mensagem WS: o upgrade é recusado com HTTP 401 e o cliente, que não enxerga o corpo da resposta de um upgrade falho, trata a falha de conexão tentando `POST /api/login` de novo (ver seção 9).
-- Após `error` com `ROOM_FULL` ou `NAME_TAKEN` o servidor mantém a conexão aberta (o cliente pode tentar outra sala/nome). `ALREADY_JOINED` ocorre se `join` chegar com a conexão já em uma sala (ignorado, sem efeito). `RATE_LIMITED` fecha a conexão.
-- Nomes são únicos por sala (comparação case-insensitive); duplicado → `NAME_TAKEN`.
+- Após `error` com `ROOM_FULL` ou `NAME_TAKEN` o servidor mantém a conexão aberta (o cliente pode tentar outro nome ou aguardar uma vaga). `ALREADY_JOINED` ocorre se `join` chegar com a conexão já na sala (ignorado, sem efeito). `RATE_LIMITED` fecha a conexão.
+- O nome é único na sala (comparação case-insensitive); duplicado → `NAME_TAKEN`.
 - IDs de peer gerados no servidor (`crypto.randomUUID()`), válidos só durante a conexão.
-- `signal` só é repassado se remetente e destinatário estiverem na mesma sala.
-- Limite de **6 peers por sala** (configurável).
-- Salas vivem só em memória e são removidas quando ficam vazias.
+- `signal` só é repassado entre quem já entrou na sala; destino inexistente é ignorado em silêncio.
+- Limite de **6 peers** na sala (`MAX_PEERS_PER_ROOM`, configurável).
+- A sala vive só em memória: ao reiniciar o servidor ela volta vazia.
 
 ## 6. Fluxo WebRTC (mesh)
 
@@ -135,12 +135,13 @@ Regras:
    - Handlers `onnegotiationneeded`, `onicecandidate`, tratamento de colisão de offers com rollback.
    - **Disparo da negociação inicial:** uma conexão sem tracks nem data channel nunca dispara `onnegotiationneeded`. Por isso, ao criar cada `RTCPeerConnection`, ambos os lados criam um data channel **pré-negociado** (`createDataChannel("ctrl", { negotiated: true, id: 0 })`), sem uso de mensagens em v1. Assim a conexão (e os stats P2P/relay) sobe assim que o par se conhece, e não só no primeiro compartilhamento. Além disso, cada lado adiciona um transceiver `recvonly` de vídeo para que a primeira offer já inclua m-line de vídeo e o áudio seja negociado conforme necessário.
    - Todo `signal` carrega `gen` (número da geração da conexão com aquele peer, começa em 0). Mensagens com `gen` menor que o atual são ignoradas.
-3. Cada peer conecta com todos os outros (N·(N−1)/2 conexões). Todos podem receber; só quem está compartilhando envia vídeo.
+3. Cada peer conecta com todos os outros (N·(N−1)/2 conexões). Todos podem receber; só quem está compartilhando envia vídeo. **Só uma pessoa compartilha por vez** (ver abaixo).
 4. **Iniciar compartilhamento:**
    - `getDisplayMedia({ video: { frameRate: { ideal: 30 } }, audio: <valor do toggle "compartilhar áudio do sistema"> })`. O toggle é lido **antes** da captura (não dá para ligar depois).
    - Para cada `RTCPeerConnection`, `addTrack` (dispara renegociação automática). O `PeerManager` guarda o stream local e **também** o adiciona a toda conexão criada depois (novos `peer-joined`, recriações, reconexões), para que quem entra tarde receba a tela.
    - Enviar `sharing { active: true }`.
    - Escutar `track.onended` (usuário clica em "Parar compartilhamento" do navegador) → executar o fluxo de parada. Cada usuário compartilha no máximo **uma** tela por vez (um stream: vídeo + áudio opcional).
+   - **Uma pessoa por vez na sala:** quem decide é o servidor. `sharing { active: true }` enquanto outra pessoa já compartilha é recusado com `error SHARE_BUSY` (sem avisar os demais); o cliente então para a captura local. Na UI o botão fica bloqueado com "<nome> está compartilhando" e volta ao normal quando ela para. Quem sai compartilhando libera a vez. Ao reentrar com `join { sharing: true }` após queda: o mesmo login mantém a vez; se outra pessoa assumiu, entra sem compartilhar e recebe `SHARE_BUSY`.
    - O tile local mostra uma prévia da própria tela (`muted`) **recolhida por padrão** para evitar efeito de espelho infinito ao compartilhar a tela inteira.
 5. **Parar:** `removeTrack` em cada sender, parar as tracks locais, enviar `sharing { active: false }`.
 6. **Qualidade:**
@@ -192,11 +193,11 @@ Uso privado entre amigos, então sem sistema de contas.
 ## 10. Frontend (UX)
 
 Telas:
-1. **JoinForm:** nome, sala, senha. Lembra nome e sala em `localStorage`. Deep link `/?room=abc` preenche a sala.
+1. **JoinForm:** apenas **nome** e **senha de acesso** (a senha é escolhida pelo dono, em `ACCESS_PASSWORD`, e compartilhada com os amigos). Lembra só o nome em `localStorage`. Não há campo de sala nem deep link.
 2. **Room:**
    - Grid responsivo com um `VideoTile` por peer que está compartilhando; tile em destaque ao clicar (tela cheia via Fullscreen API).
    - Se ninguém compartilha: estado vazio com a lista de participantes.
-   - Barra de controles: **Compartilhar / Parar**, seletor de qualidade (bitrate), toggle "compartilhar áudio do sistema", **Copiar link da sala**, **Sair**.
+   - Barra de controles: **Compartilhar / Parar**, seletor de qualidade (bitrate), toggle "compartilhar áudio do sistema" (**desligado por padrão**, com aviso sobre eco quando há call de voz; guia exibido em janela no próprio app e em `docs/audio-discord.md`). O botão **Sair** fica no canto superior direito do cabeçalho: vermelho, com ícone de saída, e o hover inverte as cores (fundo branco, texto/ícone vermelhos). Não há botão de copiar link. Na transmissão de quem assiste: ícone de **tela cheia / sair da tela cheia** dentro do tile e, com o clique direito, menu com **Silenciar** e **volume** arrastável (lembrado entre visitas).
    - Lista de participantes com nome e badge de conexão (P2P / relay / conectando / falhou).
 3. Erros claros: senha errada, sala cheia, nome em uso, sessão expirada, permissão de captura negada, navegador sem suporte a `getDisplayMedia`.
 
@@ -269,8 +270,8 @@ Cada fase termina com o projeto compilando (`tsc --noEmit`) e lint limpo.
 
 ## 14. Testes
 
-- **Unitários (Vitest):** schemas do protocolo, `rooms.ts` (join/leave/limite/sala vazia), comparação de senha, geração/validação de token, rate limiter.
-- **Integração (server):** subir o servidor, conectar 2–3 clientes `ws`, validar `joined`/`peer-joined`/`signal`/`peer-left`, senha errada (401 no login), upgrade sem token/token expirado (401), sala cheia, nome duplicado, `join` duplicado, origin inválida, `signal` entre salas diferentes (bloqueado).
+- **Unitários (Vitest):** schemas do protocolo, `rooms.ts` (join/leave/limite/substituição por mesmo login), comparação de senha, geração/validação de token, rate limiter.
+- **Integração (server):** subir o servidor, conectar 2–3 clientes `ws`, validar `joined`/`peer-joined`/`signal`/`peer-left`, senha errada (401 no login), upgrade sem token/token expirado (401), sala cheia, nome duplicado, `join` duplicado, origin inválida, `signal` para destino fora da sala (ignorado).
 - **Unitário (PeerManager):** com `RTCPeerConnection` mockada, validar polite/impolite, descarte de `signal` com `gen` antigo, fluxo de `reset`, e `addTrack` do stream local em conexões criadas depois do início do compartilhamento.
 - **Manual (checklist no README):**
   - 2 abas na mesma máquina compartilhando tela.
@@ -279,11 +280,11 @@ Cada fase termina com o projeto compilando (`tsc --noEmit`) e lint limpo.
   - 1 dispositivo em 4G (força TURN; confirmar badge "relay").
   - Parar compartilhamento pelo botão nativo do navegador.
   - Fechar aba e reabrir; queda e retorno do Wi-Fi.
-  - 4 pessoas, 2 compartilhando ao mesmo tempo.
+  - 4 pessoas: um compartilha e os outros veem o botão bloqueado; ao parar, outro assume a vez.
 
 ## 15. Critérios de aceite
 
-- Acessar `https://share.seudominio.com`, entrar com senha e sala, e ver a tela de outro participante com latência perceptivelmente baixa.
+- Acessar `https://share.seudominio.com`, entrar com nome e senha, e ver a tela de outro participante com latência perceptivelmente baixa.
 - Funciona com participantes atrás de NAT diferentes (inclusive 4G) graças ao TURN.
 - Parar compartilhamento pelo navegador atualiza todos os participantes.
 - Sem credenciais TURN no bundle do frontend; `/api/ice` e `/ws` rejeitam requisições sem token.

@@ -1,0 +1,582 @@
+:root {
+  color-scheme: dark;
+  --bg: #0f1115;
+  --panel: #181b22;
+  --panel-2: #20242d;
+  --border: #2d323d;
+  --text: #e8eaf0;
+  --muted: #9aa1b2;
+  --accent: #4c8dff;
+  --danger: #e5484d;
+  --ok: #30a46c;
+  --warn: #f5a524;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font:
+    15px/1.45 system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+}
+
+h1,
+h2 {
+  margin: 0;
+  font-weight: 600;
+}
+
+h1 {
+  font-size: 1.25rem;
+}
+
+h2 {
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+code {
+  background: var(--panel-2);
+  padding: 0.1em 0.4em;
+  border-radius: 4px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+button,
+select,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.9rem;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+input[type='text'],
+input[type='password'],
+select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+}
+
+input:focus-visible,
+select:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.error {
+  color: var(--danger);
+  margin: 0;
+}
+
+.notice {
+  color: var(--warn);
+  margin: 0;
+}
+
+/* ---------- Join ---------- */
+
+.join {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+}
+
+.join-form {
+  width: min(100%, 380px);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.join-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.join-form p {
+  margin: 0;
+}
+
+/* ---------- Sala ---------- */
+
+/* Layout de altura fixa: a página nunca rola; os tiles se ajustam ao espaço disponível. */
+.room {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    'header header'
+    'stage sidebar'
+    'footer footer';
+}
+
+.room-header {
+  grid-area: header;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.banner {
+  margin: 0;
+  color: var(--warn);
+  font-size: 0.9rem;
+}
+
+.stage {
+  grid-area: stage;
+  padding: 16px;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Preenche o palco: cada tile recebe uma fração igual da altura e o vídeo se ajusta dentro dele. */
+.grid {
+  height: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.empty {
+  height: 100%;
+  display: grid;
+  place-content: center;
+  text-align: center;
+}
+
+.empty p {
+  margin: 4px 0;
+}
+
+.sidebar {
+  grid-area: sidebar;
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+  padding: 14px;
+  overflow: auto;
+}
+
+.participants {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.participants li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.participants li > span:first-child {
+  flex: 1 1 100%;
+  overflow-wrap: anywhere;
+}
+
+.room-footer {
+  grid-area: footer;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  padding: 10px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+
+label.inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+/* ---------- Tiles ---------- */
+
+.tile {
+  position: relative;
+  background: #000;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+
+.tile video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.tile:fullscreen {
+  border-radius: 0;
+}
+
+.tile-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  padding: 16px;
+  text-align: center;
+}
+
+.tile-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.75));
+}
+
+.tile-label {
+  font-weight: 600;
+}
+
+.tile-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.tile-actions button {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.85rem;
+}
+
+/* ---------- Badges ---------- */
+
+.badge {
+  font-size: 0.75rem;
+  padding: 0.1em 0.55em;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.badge-p2p {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.badge-relay {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.badge-failed {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.badge-connecting {
+  color: var(--muted);
+}
+
+.badge-sharing {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ---------- Telas estreitas ---------- */
+
+@media (max-width: 760px) {
+  .room {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      'header'
+      'stage'
+      'sidebar'
+      'footer';
+  }
+
+  .sidebar {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    max-height: 30vh;
+  }
+}
+
+/* ---------- Estado vazio / compartilhando ---------- */
+
+.empty-title {
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.empty-sharing .empty-title {
+  color: var(--ok);
+}
+
+.empty-sharing {
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+/* ---------- Aviso de áudio e botão em forma de link ---------- */
+
+.hint-warning {
+  color: var(--warn);
+}
+
+button.link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+
+/* ---------- Guia de áudio (dialog nativo) ---------- */
+
+dialog.guide {
+  width: min(680px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  padding: 0;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+dialog.guide::backdrop {
+  background: rgba(0, 0, 0, 0.65);
+}
+
+.guide-body {
+  padding: 20px 24px;
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+}
+
+.guide-body h2 {
+  color: var(--text);
+  font-size: 1.15rem;
+  margin-bottom: 10px;
+}
+
+.guide-body p {
+  margin: 0 0 12px;
+}
+
+.guide-diagram {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  overflow-x: auto;
+}
+
+.guide-steps {
+  margin: 0 0 14px;
+  padding-left: 1.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.guide-body details {
+  margin: 8px 0;
+  padding: 8px 12px;
+  background: var(--panel-2);
+  border-radius: 8px;
+}
+
+.guide-body summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.guide-body details ul {
+  margin: 8px 0 0;
+  padding-left: 1.2rem;
+}
+
+.guide-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+/* ---------- Botão de ícone (tela cheia) e menu de áudio do tile ---------- */
+
+/* `.tile-actions .icon-button` vence a regra `.tile-actions button` (padding) e centra o ícone. */
+.tile-actions .icon-button,
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.55);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+.tile-menu {
+  position: absolute;
+  z-index: 5;
+  width: 224px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+  font-size: 0.9rem;
+}
+
+.menu-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.menu-volume {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.menu-volume-label {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+}
+
+.menu-volume input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.icon-button svg,
+.leave-button svg {
+  display: block;
+  flex: none;
+}
+
+/* ---------- Botão Sair (canto superior direito) ---------- */
+
+.leave-button {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--danger);
+  border: 1px solid var(--danger);
+  transition:
+    background-color 0.4s,
+    color 0.4s;
+}
+
+/* Hover inverte as cores: fundo branco, texto e ícone vermelhos. */
+.leave-button:hover:not(:disabled) {
+  color: var(--danger);
+  background: #fff;
+  border-color: var(--danger);
+}

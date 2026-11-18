@@ -68,7 +68,6 @@ describe('SignalingClient', () => {
   const make = (extra: Partial<SignalingClientOptions> = {}) =>
     new SignalingClient({
       url: 'wss://share.example.com/ws',
-      room: 'sala',
       name: 'Ana',
       getSession: () => session,
       getSharing: () => sharing,
@@ -117,7 +116,7 @@ describe('SignalingClient', () => {
     expect(client.status).toBe('connecting');
 
     last().open();
-    expect(last().sent).toEqual([{ type: 'join', room: 'sala', name: 'Ana' }]);
+    expect(last().sent).toEqual([{ type: 'join', name: 'Ana' }]);
 
     last().receive(joined(ID_A, [{ id: ID_B, name: 'Bia', sharing: true }]));
     expect(client.status).toBe('connected');
@@ -249,7 +248,7 @@ describe('SignalingClient', () => {
     socket.drop();
     vi.advanceTimersByTime(1_000);
     last().open();
-    expect(last().sent).toEqual([{ type: 'join', room: 'sala', name: 'Ana', sharing: true }]);
+    expect(last().sent).toEqual([{ type: 'join', name: 'Ana', sharing: true }]);
   });
 
   it('ao reconectar emite novo joined com o novo selfId', () => {

@@ -13,30 +13,22 @@ const ID_B = '9a1d7e52-83c4-4f0b-b6a2-1c5e8d3f7a21';
 
 describe('parseClientMessage', () => {
   it('aceita join válido e aplica trim no nome', () => {
-    const result = parseClientMessage(
-      JSON.stringify({ type: 'join', room: 'sala-1', name: '  Ana  ' }),
-    );
-    expect(result).toEqual({ ok: true, message: { type: 'join', room: 'sala-1', name: 'Ana' } });
+    const result = parseClientMessage(JSON.stringify({ type: 'join', name: '  Ana  ' }));
+    expect(result).toEqual({ ok: true, message: { type: 'join', name: 'Ana' } });
   });
 
   it('aceita join com sharing', () => {
-    const result = parseClientMessage(
-      JSON.stringify({ type: 'join', room: 'abc', name: 'Ana', sharing: true }),
-    );
+    const result = parseClientMessage(JSON.stringify({ type: 'join', name: 'Ana', sharing: true }));
     expect(result.ok).toBe(true);
   });
 
   it.each([
-    ['sala vazia', { type: 'join', room: '', name: 'Ana' }],
-    ['sala com espaço', { type: 'join', room: 'minha sala', name: 'Ana' }],
-    ['sala longa demais', { type: 'join', room: 'a'.repeat(41), name: 'Ana' }],
-    ['nome vazio após trim', { type: 'join', room: 'abc', name: '   ' }],
-    ['nome longo demais', { type: 'join', room: 'abc', name: 'a'.repeat(NAME_MAX_LENGTH + 1) }],
-    ['nome com caractere de controle', { type: 'join', room: 'abc', name: 'A\u0000na' }],
-    [
-      'campo desconhecido (inclui password)',
-      { type: 'join', room: 'abc', name: 'Ana', password: 'x' },
-    ],
+    ['nome vazio após trim', { type: 'join', name: '   ' }],
+    ['nome longo demais', { type: 'join', name: 'a'.repeat(NAME_MAX_LENGTH + 1) }],
+    ['nome com caractere de controle', { type: 'join', name: 'A\u0000na' }],
+    ['sem nome', { type: 'join' }],
+    ['campo room (sala única)', { type: 'join', room: 'abc', name: 'Ana' }],
+    ['campo desconhecido (inclui password)', { type: 'join', name: 'Ana', password: 'x' }],
     ['type desconhecido', { type: 'hack' }],
   ])('rejeita %s', (_label, payload) => {
     expect(parseClientMessage(JSON.stringify(payload)).ok).toBe(false);
@@ -141,7 +133,14 @@ describe('parseServerMessage', () => {
 
   it('aceita apenas os códigos de erro definidos', () => {
     const base = { type: 'error', message: 'x' };
-    for (const code of ['ROOM_FULL', 'NAME_TAKEN', 'ALREADY_JOINED', 'RATE_LIMITED', 'INVALID']) {
+    for (const code of [
+      'ROOM_FULL',
+      'NAME_TAKEN',
+      'ALREADY_JOINED',
+      'SHARE_BUSY',
+      'RATE_LIMITED',
+      'INVALID',
+    ]) {
       expect(parseServerMessage(JSON.stringify({ ...base, code })).ok).toBe(true);
     }
     expect(parseServerMessage(JSON.stringify({ ...base, code: 'BAD_PASSWORD' })).ok).toBe(false);

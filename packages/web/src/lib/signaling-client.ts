@@ -48,7 +48,6 @@ export interface SignalingEvents {
 export interface SignalingClientOptions {
   /** URL do WS sem query, ex.: `wss://share.exemplo.com/ws`. */
   url: string;
-  room: string;
   name: string;
   /** Sessão atual; `null` ou perto de expirar → o cliente encerra com `auth-expired`. */
   getSession: () => Session | null;
@@ -171,7 +170,6 @@ export class SignalingClient extends TypedEmitter<SignalingEvents> {
       if (this.socket !== socket) return;
       this.sendMessage({
         type: 'join',
-        room: this.opts.room,
         name: this.opts.name,
         ...(this.opts.getSharing?.() ? { sharing: true } : {}),
       });

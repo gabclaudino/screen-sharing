@@ -7,7 +7,7 @@ import {
 import type { RawData, WebSocket } from 'ws';
 import type { Config } from './config';
 import type { Logger } from './logger';
-import { RoomManager, toPeerInfo } from './rooms';
+import { Room, toPeerInfo } from './rooms';
 import { RateLimiter } from './security';
 
 export interface SignalingOptions {
@@ -47,15 +47,15 @@ function send(ws: WebSocket, message: ServerMessage): void {
 
 export function createSignaling(options: SignalingOptions) {
   const { config, logger } = options;
-  const rooms = new RoomManager(config.maxPeersPerRoom);
+  const room = new Room(config.maxPeersPerRoom);
   const connections = new Set<Connection>();
   const byPeerId = new Map<string, Connection>();
 
   const sendError = (conn: Connection, code: ErrorCode, message: string): void =>
     send(conn.ws, { type: 'error', code, message });
 
-  const broadcast = (room: string, exceptPeerId: string, message: ServerMessage): void => {
-    for (const peer of rooms.peersInRoom(room)) {
+  const broadcast = (exceptPeerId: string, message: ServerMessage): void => {
+    for (const peer of room.all()) {
       if (peer.id === exceptPeerId) continue;
       const target = byPeerId.get(peer.id);
       if (target) send(target.ws, message);
@@ -67,10 +67,10 @@ export function createSignaling(options: SignalingOptions) {
     if (peerId === undefined) return;
     conn.peerId = undefined;
     byPeerId.delete(peerId);
-    const peer = rooms.leave(peerId);
+    const peer = room.leave(peerId);
     if (!peer) return;
-    broadcast(peer.room, peer.id, { type: 'peer-left', id: peer.id });
-    logger.info('leave', { room: peer.room, peer: peer.id });
+    broadcast(peer.id, { type: 'peer-left', id: peer.id });
+    logger.info('leave', { peer: peer.id });
   };
 
   const handleJoin = (conn: Connection, msg: Extract<ClientMessage, { type: 'join' }>): void => {
@@ -79,15 +79,18 @@ export function createSignaling(options: SignalingOptions) {
       return;
     }
 
-    const result = rooms.join(msg.room, {
+    // Reentrando após queda enquanto ainda compartilha: só vale se outra pessoa não assumiu
+    // a vez nesse meio-tempo (o próprio login anterior não conta, ele será substituído).
+    const shareBusy = msg.sharing === true && room.sharer(conn.sid) !== undefined;
+    const result = room.join({
       name: msg.name,
       sid: conn.sid,
-      sharing: msg.sharing ?? false,
+      sharing: msg.sharing === true && !shareBusy,
     });
     if (!result.ok) {
-      const text = result.code === 'ROOM_FULL' ? 'Sala cheia' : 'Nome já em uso nesta sala';
+      const text = result.code === 'ROOM_FULL' ? 'Sala cheia' : 'Nome já em uso na sala';
       sendError(conn, result.code, text);
-      logger.warn('join_rejected', { room: msg.room, code: result.code });
+      logger.warn('join_rejected', { code: result.code });
       return;
     }
 
@@ -100,14 +103,16 @@ export function createSignaling(options: SignalingOptions) {
         byPeerId.delete(evicted.id);
         old.ws.close(WS_CLOSE_REPLACED, 'replaced by a newer connection');
       }
-      broadcast(peer.room, peer.id, { type: 'peer-left', id: evicted.id });
+      broadcast(peer.id, { type: 'peer-left', id: evicted.id });
     }
 
     conn.peerId = peer.id;
     byPeerId.set(peer.id, conn);
     send(conn.ws, { type: 'joined', selfId: peer.id, peers: others.map(toPeerInfo) });
-    broadcast(peer.room, peer.id, { type: 'peer-joined', peer: toPeerInfo(peer) });
-    logger.info('join', { room: peer.room, peer: peer.id });
+    broadcast(peer.id, { type: 'peer-joined', peer: toPeerInfo(peer) });
+    // Avisa o cliente para parar a captura que ele ainda tem ativa.
+    if (shareBusy) sendError(conn, 'SHARE_BUSY', 'Outra pessoa já está compartilhando');
+    logger.info('join', { peer: peer.id });
   };
 
   const handleMessage = (conn: Connection, msg: ClientMessage): void => {
@@ -123,19 +128,25 @@ export function createSignaling(options: SignalingOptions) {
         return;
       case 'signal':
       case 'sharing': {
-        const self = conn.peerId === undefined ? undefined : rooms.get(conn.peerId);
+        const self = conn.peerId === undefined ? undefined : room.get(conn.peerId);
         if (!self) {
-          sendError(conn, 'INVALID', 'Entre em uma sala primeiro');
+          sendError(conn, 'INVALID', 'Entre na sala primeiro');
           return;
         }
         if (msg.type === 'sharing') {
-          rooms.setSharing(self.id, msg.active);
-          broadcast(self.room, self.id, { type: 'peer-sharing', id: self.id, active: msg.active });
+          // Uma pessoa por vez: o servidor decide, então não há disputa entre clientes.
+          if (msg.active && room.sharer(self.sid)) {
+            sendError(conn, 'SHARE_BUSY', 'Outra pessoa já está compartilhando');
+            logger.info('share_busy', { peer: self.id });
+            return;
+          }
+          room.setSharing(self.id, msg.active);
+          broadcast(self.id, { type: 'peer-sharing', id: self.id, active: msg.active });
           return;
         }
-        // Só repassa dentro da mesma sala; destino inexistente (acabou de sair) é ignorado.
+        // Só quem já entrou na sala está em byPeerId; destino que acabou de sair é ignorado.
         const target = byPeerId.get(msg.to);
-        if (!target || !rooms.sameRoom(self.id, msg.to)) return;
+        if (!target) return;
         send(target.ws, { type: 'signal', from: self.id, data: msg.data });
         return;
       }
@@ -204,5 +215,5 @@ export function createSignaling(options: SignalingOptions) {
     for (const conn of connections) conn.ws.close(1001, 'server shutting down');
   };
 
-  return { handleConnection, close, rooms };
+  return { handleConnection, close, room };
 }

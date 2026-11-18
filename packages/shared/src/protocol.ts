@@ -4,7 +4,6 @@ import { z } from 'zod';
 // pelo servidor via `maxPayload` do `ws`; aqui ficam os limites por campo.
 export const PROTOCOL_VERSION = 1;
 export const MAX_WS_MESSAGE_BYTES = 64 * 1024;
-export const ROOM_ID_PATTERN = /^[a-zA-Z0-9_-]{1,40}$/;
 export const NAME_MAX_LENGTH = 30;
 export const SDP_MAX_LENGTH = 32 * 1024;
 export const CANDIDATE_MAX_LENGTH = 2 * 1024;
@@ -12,8 +11,6 @@ export const CANDIDATE_MAX_LENGTH = 2 * 1024;
 // ---------------------------------------------------------------------------
 // Campos básicos
 // ---------------------------------------------------------------------------
-
-export const roomIdSchema = z.string().regex(ROOM_ID_PATTERN);
 
 // `trim` roda antes das verificações de tamanho; caracteres de controle são proibidos.
 export const nameSchema = z
@@ -70,10 +67,10 @@ export type SignalData = z.infer<typeof signalDataSchema>;
 // Cliente → Servidor
 // ---------------------------------------------------------------------------
 
-// A autenticação acontece no upgrade do WS (token), então `join` não carrega senha.
+// Há uma única sala: `join` não escolhe sala. A autenticação acontece no upgrade do WS
+// (token), então também não carrega senha.
 export const joinMessageSchema = z.strictObject({
   type: z.literal('join'),
-  room: roomIdSchema,
   name: nameSchema,
   // true ao reentrar após reconexão enquanto ainda está compartilhando.
   sharing: z.boolean().optional(),
@@ -111,6 +108,8 @@ export const errorCodeSchema = z.enum([
   'ROOM_FULL',
   'NAME_TAKEN',
   'ALREADY_JOINED',
+  // Só uma pessoa compartilha por vez: outra já está transmitindo.
+  'SHARE_BUSY',
   'RATE_LIMITED',
   'INVALID',
 ]);

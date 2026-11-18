@@ -1,6 +1,21 @@
-import { PROTOCOL_VERSION } from '@screenshare/shared';
+import { useCallback, useState } from 'react';
+import { JoinForm, type JoinParams } from './components/JoinForm';
+import { Room } from './components/Room';
 
-// Placeholder da fase 1; a UI real (JoinForm, Room) entra na fase 6.
+type View = { kind: 'join'; notice: string | null } | ({ kind: 'room' } & JoinParams);
+
 export function App() {
-  return <p>ScreenShare Mesh (protocol v{PROTOCOL_VERSION})</p>;
+  const [view, setView] = useState<View>({ kind: 'join', notice: null });
+
+  const leave = useCallback(
+    (notice?: string) => setView({ kind: 'join', notice: notice ?? null }),
+    [],
+  );
+
+  if (view.kind === 'room') {
+    return <Room name={view.name} session={view.session} onLeave={leave} />;
+  }
+  return (
+    <JoinForm notice={view.notice} onJoin={(params) => setView({ kind: 'room', ...params })} />
+  );
 }
