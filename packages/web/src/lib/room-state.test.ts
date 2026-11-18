@@ -25,6 +25,7 @@ describe('roomReducer', () => {
       selfId: null,
       peers: {},
       everJoined: false,
+      iceFallback: false,
       shareRejections: 0,
       lastError: null,
       closed: null,
@@ -90,6 +91,15 @@ describe('roomReducer', () => {
       lastError: 'ROOM_FULL',
       closed: 'rejected',
     });
+  });
+
+  it('ice-fallback liga e desliga o aviso de relay indisponível', () => {
+    expect(run([{ type: 'ice-fallback', fallback: true }]).iceFallback).toBe(true);
+    const recovered = run([
+      { type: 'ice-fallback', fallback: true },
+      { type: 'ice-fallback', fallback: false },
+    ]);
+    expect(recovered.iceFallback).toBe(false);
   });
 
   it('share-rejected conta cada recusa do servidor', () => {

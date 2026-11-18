@@ -179,6 +179,23 @@ export const loginResponseSchema = z.strictObject({
 export type LoginResponse = z.infer<typeof loginResponseSchema>;
 
 // ---------------------------------------------------------------------------
+// API HTTP: GET /api/ice
+// ---------------------------------------------------------------------------
+
+// Equivalente a RTCIceServer (STUN sem credenciais; TURN com username/credential).
+export const iceServerSchema = z.object({
+  urls: z.union([z.string().min(1), z.array(z.string().min(1)).min(1)]),
+  username: z.string().optional(),
+  credential: z.string().optional(),
+});
+export type IceServer = z.infer<typeof iceServerSchema>;
+
+export const iceServersResponseSchema = z.object({
+  iceServers: z.array(iceServerSchema),
+});
+export type IceServersResponse = z.infer<typeof iceServersResponseSchema>;
+
+// ---------------------------------------------------------------------------
 // Parsing de mensagens brutas (string JSON recebida no WebSocket)
 // ---------------------------------------------------------------------------
 

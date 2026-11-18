@@ -170,6 +170,12 @@ export function Room({ name, session, onLeave }: Props) {
       </aside>
 
       <footer className="room-footer">
+        {state.iceFallback ? (
+          <p className="notice" role="status">
+            Não foi possível obter os servidores de relay. Conexões entre redes restritivas (4G,
+            empresa, faculdade) podem falhar; entre redes comuns continua funcionando.
+          </p>
+        ) : null}
         {share.error ? (
           <p className="error" role="alert">
             {share.error}

@@ -163,7 +163,7 @@ Regras:
   - Opção B: **Metered.ca** (tier gratuito, via API de credenciais).
   - Opção C (fora do v1): `coturn` no PC com port-forward de UDP no roteador.
   - Verificar os limites vigentes do tier gratuito do provedor escolhido antes de implementar; o design não deve depender de números específicos.
-- **Abstração:** o backend expõe `GET /api/ice` que devolve `{ iceServers: RTCIceServer[] }`. A chave/segredo do provedor TURN fica **apenas no servidor** (env), nunca no bundle do frontend. O endpoint gera credenciais de curta duração (TTL ~1 h) chamando a API do provedor, com cache em memória por alguns minutos.
+- **Abstração:** o backend expõe `GET /api/ice` que devolve `{ iceServers: RTCIceServer[] }`. A chave/segredo do provedor TURN fica **apenas no servidor** (env), nunca no bundle do frontend. O endpoint gera credenciais efêmeras chamando a API do provedor, com cache em memória de ~5 min. **TTL padrão de 24 h** (`ICE_CREDENTIAL_TTL_SEC`, máx. 48 h no Cloudflare): ele precisa ser maior que a sessão mais longa, pois uma conexão via relay deixa de funcionar quando a credencial expira. O cliente renova a lista a cada ~25 min (só afeta conexões novas). Cloudflare: `POST https://rtc.live.cloudflare.com/v1/turn/keys/<KEY_ID>/credentials/generate-ice-servers` com `{ ttl }`; Metered: `GET https://<app>.metered.live/api/v1/turn/credentials?apiKey=<KEY>`. O endpoint exige `Authorization: Bearer <token>` (nunca na URL).
 - Interface `IceProvider` em `server/src/ice.ts` com implementações `CloudflareIceProvider` e `MeteredIceProvider`, selecionadas por `ICE_PROVIDER` no env. Se não configurado, devolve só STUN (dev local).
 - O endpoint exige o mesmo token de acesso da sala (ver seção 8) para não expor TURN a terceiros.
 - Falha ao falar com o provedor TURN: `/api/ice` loga o erro e responde apenas com STUN (HTTP 200), nunca 500, para que a sala continue funcionando entre quem consegue P2P direto.
@@ -226,7 +226,7 @@ LOGIN_RATE_WINDOW_MIN=10
 WS_MSG_RATE_PER_SEC=50
 STATIC_DIR=packages/web/dist
 ICE_PROVIDER=cloudflare        # cloudflare | metered | none
-ICE_CREDENTIAL_TTL_SEC=3600
+ICE_CREDENTIAL_TTL_SEC=86400
 CLOUDFLARE_TURN_KEY_ID=
 CLOUDFLARE_TURN_API_TOKEN=
 METERED_APP_NAME=

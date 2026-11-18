@@ -30,7 +30,7 @@ describe('loadConfig', () => {
       loginRateMax: 10,
       loginRateWindowMs: 10 * 60_000,
       wsMsgRatePerSec: 50,
-      ice: { provider: 'none', credentialTtlSec: 3600 },
+      ice: { provider: 'none', credentialTtlSec: 86400 },
     });
   });
 

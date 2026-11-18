@@ -16,11 +16,16 @@ import {
   verifyToken,
 } from './security';
 import { createStaticHandler } from './static';
+import { createIceProvider, IceService } from './ice';
 
 export interface AppOptions {
   logger?: Logger;
   heartbeatIntervalMs?: number;
   heartbeatTimeoutMs?: number;
+  /** Substitui o fetch usado para falar com o provedor de TURN (testes). */
+  fetchImpl?: typeof fetch;
+  /** Por quanto tempo reaproveitar as credenciais TURN (padrão 5 min). */
+  iceCacheMs?: number;
 }
 
 const MAX_LOGIN_BODY_BYTES = 1024;
@@ -70,6 +75,10 @@ export function createApp(config: Config, options: AppOptions = {}) {
     logger,
     heartbeatIntervalMs: options.heartbeatIntervalMs ?? 15_000,
     heartbeatTimeoutMs: options.heartbeatTimeoutMs ?? 60_000,
+  });
+  const iceService = new IceService(createIceProvider(config.ice, options.fetchImpl), {
+    logger,
+    ...(options.iceCacheMs === undefined ? {} : { cacheMs: options.iceCacheMs }),
   });
   const serveStatic = createStaticHandler(config.staticDir);
   const loginLimiter = new RateLimiter(config.loginRateMax, config.loginRateWindowMs);
@@ -135,6 +144,18 @@ export function createApp(config: Config, options: AppOptions = {}) {
     sendJson(res, 200, response);
   }
 
+  // Só quem já fez login recebe as credenciais TURN (token no header, nunca na URL).
+  async function handleIce(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const header = req.headers.authorization;
+    const token = header?.startsWith('Bearer ') ? header.slice(7).trim() : '';
+    if (!token || !verifyToken(token, config.sessionSecret)) {
+      sendJson(res, 401, { error: 'UNAUTHORIZED' });
+      return;
+    }
+    // Nunca 5xx por falha do provedor: o IceService já cai para só STUN.
+    sendJson(res, 200, { iceServers: await iceService.getIceServers() });
+  }
+
   async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     applySecurityHeaders(res, config);
     const { pathname } = new URL(req.url ?? '/', 'http://localhost');
@@ -146,6 +167,15 @@ export function createApp(config: Config, options: AppOptions = {}) {
         return;
       }
       await handleLogin(req, res);
+      return;
+    }
+    if (pathname === '/api/ice') {
+      if (req.method !== 'GET') {
+        res.setHeader('Allow', 'GET');
+        sendJson(res, 405, { error: 'METHOD_NOT_ALLOWED' });
+        return;
+      }
+      await handleIce(req, res);
       return;
     }
     // Rotas /api/* desconhecidas nunca caem no fallback SPA.

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 import type { Session } from '../lib/auth';
-import { DEFAULT_ICE_SERVERS } from '../lib/ice';
+import { IceServerStore } from '../lib/ice';
 import { PeerManager } from '../lib/peer-manager';
 import { createInitialRoomState, roomReducer, type RoomState } from '../lib/room-state';
 import { buildWsUrl, SignalingClient } from '../lib/signaling-client';
@@ -42,9 +42,13 @@ export function useRoom({ name, session }: UseRoomParams): UseRoomResult {
       // Reentrando após queda do WS enquanto ainda compartilha: o servidor precisa saber.
       getSharing: () => sharingRef.current,
     });
+    const ice = new IceServerStore({
+      getSession: () => sessionRef.current,
+      onFallbackChange: (fallback) => dispatch({ type: 'ice-fallback', fallback }),
+    });
     const manager = new PeerManager({
       sendSignal: (to, data) => client.sendSignal(to, data),
-      getIceServers: () => DEFAULT_ICE_SERVERS,
+      getIceServers: () => ice.get(),
       maxBitrate: bitrateRef.current,
     });
     clientRef.current = client;
@@ -81,9 +85,18 @@ export function useRoom({ name, session }: UseRoomParams): UseRoomResult {
       ),
     ];
 
-    client.connect();
+    // Busca os iceServers (STUN + TURN) antes de conectar: nenhuma conexão P2P pode nascer sem
+    // eles. Se a busca falhar, segue só com STUN e a UI avisa (state.iceFallback).
+    let cancelled = false;
+    void ice.refresh().then(() => {
+      if (cancelled) return;
+      client.connect();
+      ice.startAutoRefresh();
+    });
 
     return () => {
+      cancelled = true;
+      ice.stop();
       // Desinscreve antes de desconectar: o `closed` do disconnect() não deve chegar à UI.
       off.forEach((unsubscribe) => unsubscribe());
       manager.closeAll();

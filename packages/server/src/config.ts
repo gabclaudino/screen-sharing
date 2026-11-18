@@ -74,7 +74,7 @@ const envSchema = z
     WS_MSG_RATE_PER_SEC: positiveInt(50),
     STATIC_DIR: z.string().min(1).default('packages/web/dist'),
     ICE_PROVIDER: z.enum(['cloudflare', 'metered', 'none']).default('none'),
-    ICE_CREDENTIAL_TTL_SEC: positiveInt(3600, 60, 86400),
+    ICE_CREDENTIAL_TTL_SEC: positiveInt(86400, 60, 172800),
     CLOUDFLARE_TURN_KEY_ID: z.string().optional(),
     CLOUDFLARE_TURN_API_TOKEN: z.string().optional(),
     METERED_APP_NAME: z.string().optional(),

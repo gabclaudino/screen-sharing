@@ -555,6 +555,103 @@ describe('servidor (WebSocket)', () => {
   });
 });
 
+describe('GET /api/ice', () => {
+  const TURN = {
+    urls: ['turn:turn.example.com:3478?transport=udp'],
+    username: 'u-efemero',
+    credential: 'c-efemero',
+  };
+  const cloudflare = {
+    ICE_PROVIDER: 'cloudflare',
+    CLOUDFLARE_TURN_KEY_ID: 'chave-id',
+    CLOUDFLARE_TURN_API_TOKEN: 'TOKEN-SECRETO-DA-API',
+  };
+  const get = (running: Running, headers: Record<string, string> = {}) =>
+    fetch(`${running.http}/api/ice`, { headers });
+
+  it('exige o token de sessão no header Authorization', async () => {
+    const running = await startApp();
+    try {
+      const token = await getToken(running);
+      expect((await get(running)).status).toBe(401);
+      expect((await get(running, { Authorization: 'Bearer lixo' })).status).toBe(401);
+      expect((await get(running, { Authorization: token })).status).toBe(401); // sem "Bearer "
+      // o token na query string não vale (iria parar em logs de proxy)
+      expect((await fetch(`${running.http}/api/ice?token=${token}`)).status).toBe(401);
+      const expired = createToken(SECRET, 'sid', 60, Date.now() - 3600_000).token;
+      expect((await get(running, { Authorization: `Bearer ${expired}` })).status).toBe(401);
+    } finally {
+      await running.app.close();
+    }
+  });
+
+  it('sem provedor (ICE_PROVIDER=none) devolve só STUN', async () => {
+    const running = await startApp();
+    try {
+      const token = await getToken(running);
+      const res = await get(running, { Authorization: `Bearer ${token}` });
+      expect(res.status).toBe(200);
+      expect(res.headers.get('cache-control')).toBe('no-store');
+      const body = (await res.json()) as { iceServers: { urls: string[] }[] };
+      expect(body.iceServers).toHaveLength(1);
+      expect(body.iceServers[0]?.urls[0]).toMatch(/^stun:/);
+    } finally {
+      await running.app.close();
+    }
+  });
+
+  it('com provedor devolve STUN + TURN, usa cache e nunca expõe a chave da API', async () => {
+    const calls: string[] = [];
+    const fetchImpl: typeof fetch = async (input) => {
+      calls.push(String(input));
+      return new Response(JSON.stringify({ iceServers: [TURN] }), { status: 201 });
+    };
+    const running = await startApp(cloudflare, { fetchImpl });
+    try {
+      const token = await getToken(running);
+      const auth = { Authorization: `Bearer ${token}` };
+      const first = await (await get(running, auth)).text();
+      const second = await (await get(running, auth)).text();
+
+      const body = JSON.parse(first) as { iceServers: unknown[] };
+      expect(body.iceServers).toHaveLength(2);
+      expect(body.iceServers[1]).toEqual(TURN);
+      expect(second).toBe(first);
+      expect(calls).toHaveLength(1); // a segunda veio do cache
+      expect(calls[0]).toContain('/v1/turn/keys/chave-id/credentials/generate-ice-servers');
+      expect(first).not.toContain('TOKEN-SECRETO-DA-API');
+    } finally {
+      await running.app.close();
+    }
+  });
+
+  it('se o provedor falha, responde 200 só com STUN (nunca 5xx)', async () => {
+    const fetchImpl: typeof fetch = async () => new Response('erro', { status: 500 });
+    const running = await startApp(cloudflare, { fetchImpl });
+    try {
+      const token = await getToken(running);
+      const res = await get(running, { Authorization: `Bearer ${token}` });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { iceServers: { urls: string[] }[] };
+      expect(body.iceServers).toHaveLength(1);
+      expect(body.iceServers[0]?.urls[0]).toMatch(/^stun:/);
+    } finally {
+      await running.app.close();
+    }
+  });
+
+  it('métodos diferentes de GET → 405', async () => {
+    const running = await startApp();
+    try {
+      const res = await fetch(`${running.http}/api/ice`, { method: 'POST' });
+      expect(res.status).toBe(405);
+      expect(res.headers.get('allow')).toBe('GET');
+    } finally {
+      await running.app.close();
+    }
+  });
+});
+
 describe('servidor (limites e heartbeat)', () => {
   it('excesso de mensagens por segundo → RATE_LIMITED e fecha', async () => {
     const running = await startApp({ WS_MSG_RATE_PER_SEC: '5' });

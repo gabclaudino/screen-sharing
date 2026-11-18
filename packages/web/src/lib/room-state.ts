@@ -17,6 +17,8 @@ export interface RoomState {
   peers: Record<string, PeerView>;
   /** true depois do primeiro `joined`; distingue "conectando pela 1ª vez" de "reconectando". */
   everJoined: boolean;
+  /** Sem os servidores de relay (TURN): só conexões diretas; redes restritivas podem falhar. */
+  iceFallback: boolean;
   /** Quantas vezes o servidor recusou um compartilhamento (SHARE_BUSY); a UI reage a cada uma. */
   shareRejections: number;
   /** Último erro enviado pelo servidor (sala cheia, nome em uso...). */
@@ -34,6 +36,7 @@ export type RoomAction =
   | { type: 'peer-stream'; id: string; stream: MediaStream | null }
   | { type: 'error'; code: ErrorCode }
   | { type: 'share-rejected' }
+  | { type: 'ice-fallback'; fallback: boolean }
   | { type: 'closed'; reason: CloseReason };
 
 export const createInitialRoomState = (): RoomState => ({
@@ -41,6 +44,7 @@ export const createInitialRoomState = (): RoomState => ({
   selfId: null,
   peers: {},
   everJoined: false,
+  iceFallback: false,
   shareRejections: 0,
   lastError: null,
   closed: null,
@@ -91,6 +95,8 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
       return updatePeer(state, action.id, { stream: action.stream });
     case 'error':
       return { ...state, lastError: action.code };
+    case 'ice-fallback':
+      return { ...state, iceFallback: action.fallback };
     case 'share-rejected':
       return { ...state, shareRejections: state.shareRejections + 1 };
     case 'closed':
