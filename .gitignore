@@ -1,0 +1,9 @@
+node_modules
+dist
+coverage
+.env
+*.log
+.vite
+# cloudflared: nunca versionar credenciais do tunnel
+cloudflared/*.json
+cloudflared/config.yml
