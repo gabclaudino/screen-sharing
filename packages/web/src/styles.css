@@ -580,3 +580,123 @@ dialog.guide::backdrop {
   background: #fff;
   border-color: var(--danger);
 }
+
+/* ---------- Fotos espalhadas pelo fundo da tela de entrada ---------- */
+
+.join {
+  position: relative;
+  overflow: hidden;
+}
+
+.bg-photos {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.bg-photo {
+  position: absolute;
+  display: block;
+  height: auto;
+  border: 4px solid #f2f3f7;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  opacity: 0.92;
+  user-select: none;
+}
+
+/* `display: block` acima venceria o atributo `hidden`: sem isto a foto quebrada não some. */
+.bg-photo[hidden] {
+  display: none;
+}
+
+/* O formulário fica por cima das fotos. */
+.join-form {
+  position: relative;
+  z-index: 1;
+}
+
+/* Cada foto num canto diferente, levemente girada, sem cobrir o fundo todo. */
+.bg-photo-1 {
+  top: 5%;
+  left: 6%;
+  width: 150px;
+  transform: rotate(-6deg);
+}
+
+.bg-photo-2 {
+  top: 9%;
+  right: 7%;
+  width: 170px;
+  transform: rotate(5deg);
+}
+
+.bg-photo-3 {
+  bottom: 7%;
+  left: 9%;
+  width: 160px;
+  transform: rotate(4deg);
+}
+
+.bg-photo-4 {
+  bottom: 5%;
+  right: 11%;
+  width: 140px;
+  transform: rotate(-5deg);
+}
+
+.bg-photo-5 {
+  top: 45%;
+  left: 2%;
+  width: 115px;
+  transform: rotate(3deg);
+}
+
+.bg-photo-6 {
+  top: 40%;
+  right: 3%;
+  width: 125px;
+  transform: rotate(-4deg);
+}
+
+/* Celular: o formulário ocupa a largura toda, então as fotos vão para as faixas de cima e de baixo. */
+@media (max-width: 760px) {
+  .bg-photo {
+    width: 84px;
+    border-width: 3px;
+  }
+
+  .bg-photo-1 {
+    top: 1.5%;
+    left: 4%;
+  }
+
+  .bg-photo-2 {
+    top: 2%;
+    right: auto;
+    left: 36%;
+  }
+
+  .bg-photo-5 {
+    top: 1.5%;
+    right: 4%;
+    left: auto;
+  }
+
+  .bg-photo-3 {
+    bottom: 2%;
+    left: 5%;
+  }
+
+  .bg-photo-4 {
+    bottom: 2.5%;
+    right: auto;
+    left: 37%;
+  }
+
+  .bg-photo-6 {
+    top: auto;
+    bottom: 2%;
+    right: 5%;
+  }
+}

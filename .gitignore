@@ -7,3 +7,6 @@ coverage
 # cloudflared: nunca versionar credenciais do tunnel
 cloudflared/*.json
 cloudflared/config.yml
+logs/
+# fotos pessoais do fundo da tela de entrada: NÃO publicar no repositório público
+packages/web/public/fotos/

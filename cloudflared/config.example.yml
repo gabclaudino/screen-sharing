@@ -1,0 +1,12 @@
+# Alternativa ao tunnel criado pelo painel: tunnel "gerenciado localmente", com arquivo de config.
+# Copie para cloudflared/config.yml (ignorado pelo git) e preencha. Passo a passo no README.
+#
+# ATENÇÃO: nunca versione o arquivo de credenciais (<TUNNEL_ID>.json): quem o tiver pode
+# rodar um tunnel no seu domínio.
+tunnel: <TUNNEL_ID>
+credentials-file: C:\caminho\para\<TUNNEL_ID>.json
+
+ingress:
+  - hostname: share.seudominio.com
+    service: http://localhost:3000
+  - service: http_status:404

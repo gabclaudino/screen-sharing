@@ -173,7 +173,7 @@ Regras:
 Uso privado entre amigos, então sem sistema de contas.
 
 - **Senha compartilhada:** `ACCESS_PASSWORD` no env. Comparação em tempo constante (`crypto.timingSafeEqual`, comparando hashes SHA-256 de mesmo tamanho para não vazar comprimento). A senha é enviada **só** no `POST /api/login`; o WS e o `join` não a carregam (a posse do token é a prova). Salas com senha própria ficam fora do v1.
-- **Fluxo de login (cliente):** JoinForm → `POST /api/login { password }` → em caso de 200, guarda o token **em memória** (e em `sessionStorage` para sobreviver a F5) → abre `/ws?token=...` → envia `join`. Senha errada → HTTP 401 e mensagem "senha incorreta" na UI.
+- **Fluxo de login (cliente):** JoinForm → `POST /api/login { password }` → em caso de 200, guarda o token **só em memória** (nada em `sessionStorage`/`localStorage`) → abre `/ws?token=...` → envia `join`. Senha errada → HTTP 401 e mensagem "senha incorreta" na UI. **A senha é exigida SEMPRE para entrar na sala**, haja ou não alguém nela: sair da sala ou recarregar a página (F5) descarta o token e pede a senha de novo. O token só serve para reconectar o WebSocket dentro da mesma sala aberta (queda de rede), até expirar.
 - **Token de sessão:** `POST /api/login` devolve `{ token, expiresAt }`, assinado com HMAC (`SESSION_SECRET`, expiração 12 h), usado como `Authorization: Bearer` no `/api/ice` e como query param do WS (`/ws?token=...`). O WS rejeita upgrade sem token válido (HTTP 401). O token no query string é aceito por limitação da API de WebSocket do navegador; por isso **não logar a URL do upgrade**.
 - **Token expirado:** se o upgrade falhar com 401 ou o token estiver a menos de 5 min de expirar ao reconectar, o cliente descarta o token e volta ao JoinForm com a senha pré-solicitada ("sessão expirou"). A senha **não** é guardada pelo cliente.
 - **Origin check** no upgrade do WebSocket contra `ALLOWED_ORIGIN` (ex.: `https://share.seudominio.com`). Em desenvolvimento (`NODE_ENV=development`) é aceita também a origem do Vite (`http://localhost:5173`).
@@ -201,7 +201,7 @@ Uso privado entre amigos, então sem sistema de contas.
 ## 10. Frontend (UX)
 
 Telas:
-1. **JoinForm:** apenas **nome** e **senha de acesso** (a senha é escolhida pelo dono, em `ACCESS_PASSWORD`, e compartilhada com os amigos). Lembra só o nome em `localStorage`. Não há campo de sala nem deep link.
+1. **JoinForm:** apenas **nome** e **senha de acesso, sempre obrigatória** (a senha é escolhida pelo dono, em `ACCESS_PASSWORD`, e compartilhada com os amigos). Lembra só o nome em `localStorage`. Não há campo de sala nem deep link. O título visível do app é **"Tela dos Guri"** (descrição: "Se Liga Fi !") e a tela de entrada tem **6 fotos espalhadas pelo fundo** (`public/fotos/`, fora do git por serem fotos de pessoas num repositório público; o app funciona sem elas). O site pede aos buscadores para não indexá-lo (`noindex`, `robots.txt`).
 2. **Room:**
    - Grid responsivo com um `VideoTile` por peer que está compartilhando; tile em destaque ao clicar (tela cheia via Fullscreen API).
    - Se ninguém compartilha: estado vazio com a lista de participantes.
@@ -248,6 +248,8 @@ METERED_API_KEY=
 - Carregamento do `.env`: usar `node --env-file=.env` (Node ≥ 20.6) nos scripts `start`/`dev`, sem adicionar `dotenv`. Requer Node ≥ 20.6 (documentar no README e em `engines`).
 
 ## 12. Cloudflare Tunnel
+
+> **Operação (ligar/desligar):** o app só precisa estar no ar quando alguém vai compartilhar. A raiz do projeto tem `LIGAR.bat`, `DESLIGAR.bat` e `STATUS.bat` (duplo clique), que chamam `scripts/servidor.ps1`. O serviço do `cloudflared` fica sempre ligado; com o app desligado o endereço público mostra 502, por desenho. O `LIGAR` refaz o build sozinho se o front mudou e recusa agir se a porta estiver ocupada por outro programa.
 
 `cloudflared/config.example.yml`:
 

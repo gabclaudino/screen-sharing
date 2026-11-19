@@ -1,8 +1,10 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { NAME_MAX_LENGTH } from '@screenshare/shared';
-import { loadStoredSession, login, LoginError, storeSession, type Session } from '../lib/auth';
-import { isValidName, loadProfile, saveProfile } from '../lib/profile';
+import { login, LoginError, type Session } from '../lib/auth';
+import { validateJoin } from '../lib/join-validation';
+import { loadProfile, saveProfile } from '../lib/profile';
 import { isRoomSupported } from '../lib/support';
+import { BackgroundPhotos } from './BackgroundPhotos';
 
 export interface JoinParams {
   name: string;
@@ -16,15 +18,8 @@ interface Props {
 }
 
 export function JoinForm({ notice, onJoin }: Props) {
-  const initial = useMemo(() => {
-    const profile = loadProfile();
-    return {
-      name: profile.name ?? '',
-      stored: loadStoredSession(),
-    };
-  }, []);
-
-  const [name, setName] = useState(initial.name);
+  // Só o nome é lembrado entre visitas; a senha nunca.
+  const [name, setName] = useState(() => loadProfile().name ?? '');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -41,23 +36,17 @@ export function JoinForm({ notice, onJoin }: Props) {
       return;
     }
 
-    const trimmedName = name.trim();
-    if (!isValidName(trimmedName)) {
-      setError(`Digite um nome de 1 a ${NAME_MAX_LENGTH} caracteres.`);
+    // A senha é exigida SEMPRE, há ou não alguém na sala, e a cada vez que se entra.
+    const invalid = validateJoin(name, password);
+    if (invalid) {
+      setError(invalid);
       return;
     }
+    const trimmedName = name.trim();
 
     setBusy(true);
     try {
-      let session = initial.stored;
-      if (password !== '') {
-        session = await login(password);
-        storeSession(session);
-      }
-      if (!session) {
-        setError('Digite a senha de acesso.');
-        return;
-      }
+      const session = await login(password);
       saveProfile({ name: trimmedName });
       onJoin({ name: trimmedName, session });
     } catch (loginError) {
@@ -69,11 +58,10 @@ export function JoinForm({ notice, onJoin }: Props) {
 
   return (
     <main className="join">
+      <BackgroundPhotos />
       <form className="card join-form" onSubmit={(event) => void handleSubmit(event)}>
-        <h1>ScreenShare Mesh</h1>
-        <p className="muted">
-          Compartilhe sua tela com os amigos, direto de navegador para navegador.
-        </p>
+        <h1>Tela dos Guri</h1>
+        <p className="muted">Se Liga Fi !</p>
 
         {notice ? (
           <p className="notice" role="status">
@@ -100,7 +88,7 @@ export function JoinForm({ notice, onJoin }: Props) {
             value={password}
             autoComplete="current-password"
             onChange={(event) => setPassword(event.target.value)}
-            placeholder={initial.stored ? 'Sessão ativa: senha opcional' : ''}
+            required
           />
         </label>
 

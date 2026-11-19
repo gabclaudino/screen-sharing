@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRoom } from '../hooks/useRoom';
 import { useScreenShare, type ContentHint } from '../hooks/useScreenShare';
-import { clearStoredSession, type Session } from '../lib/auth';
+import type { Session } from '../lib/auth';
 import { hasSeenAudioGuide, markAudioGuideSeen } from '../lib/profile';
 import {
   allPeers,
@@ -87,7 +87,7 @@ export function Room({ name, session, onLeave }: Props) {
   return (
     <div className="room">
       <header className="room-header">
-        <h1>ScreenShare Mesh</h1>
+        <h1>Tela dos Guri</h1>
         {state.phase !== 'connected' ? (
           <p className="banner" role="status">
             {state.everJoined
@@ -100,7 +100,6 @@ export function Room({ name, session, onLeave }: Props) {
                 <button
                   type="button"
                   onClick={() => {
-                    clearStoredSession();
                     onLeave('Entre novamente com a senha.');
                   }}
                 >
