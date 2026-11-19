@@ -58,7 +58,12 @@ const last = (): FakeSocket => {
   return socket;
 };
 
-const joined = (selfId = ID_A, peers: unknown[] = []) => ({ type: 'joined', selfId, peers });
+const joined = (selfId = ID_A, peers: unknown[] = [], selfName = 'Ana') => ({
+  type: 'joined',
+  selfId,
+  selfName,
+  peers,
+});
 
 describe('SignalingClient', () => {
   let now: number;
@@ -122,7 +127,7 @@ describe('SignalingClient', () => {
     expect(client.status).toBe('connected');
     expect(statuses).toEqual(['connecting', 'connected']);
     expect(joinedEvents).toEqual([
-      { selfId: ID_A, peers: [{ id: ID_B, name: 'Bia', sharing: true }] },
+      { selfId: ID_A, selfName: 'Ana', peers: [{ id: ID_B, name: 'Bia', sharing: true }] },
     ]);
   });
 
@@ -147,6 +152,21 @@ describe('SignalingClient', () => {
       ['peer-sharing', { id: ID_B, active: true }],
       ['peer-left', ID_B],
     ]);
+  });
+
+  it('sendReaction só envia conectado e reaction do servidor vira evento', () => {
+    const { client, socket } = connected();
+    const events: unknown[] = [];
+    client.on('reaction', (e) => events.push(e));
+
+    expect(client.sendReaction('🔥')).toBe(true);
+    expect(socket.sent.at(-1)).toEqual({ type: 'reaction', emoji: '🔥' });
+
+    socket.receive({ type: 'reaction', from: ID_B, emoji: '😂' });
+    expect(events).toEqual([{ from: ID_B, emoji: '😂' }]);
+
+    client.disconnect();
+    expect(client.sendReaction('🔥')).toBe(false);
   });
 
   it('on() devolve função que remove o listener', () => {

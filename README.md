@@ -4,6 +4,7 @@ Compartilhamento de tela entre amigos, direto de navegador para navegador (WebRT
 sala** protegida por uma senha. Custo ~zero e hospedado no seu próprio PC.
 
 - **Uma pessoa compartilha por vez**; até 6 pessoas na sala.
+- **Reações:** botões de emoji (😂 🔥 💀 👏 ❤️ 😮) que sobem pela tela de todo mundo.
 - O servidor só repassa a sinalização: **o vídeo nunca passa por ele**.
 - Conexão direta (P2P) quando possível; **relay TURN** (Cloudflare) para quem está em 4G/5G, empresa
   ou faculdade.
@@ -99,7 +100,17 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 | `CLOUDFLARE_TURN_KEY_ID`    | —                   | Obrigatória se `ICE_PROVIDER=cloudflare` (seção 7).                                                                                                                                                                        |
 | `CLOUDFLARE_TURN_API_TOKEN` | —                   | Obrigatória se `ICE_PROVIDER=cloudflare`.                                                                                                                                                                                  |
 | `METERED_APP_NAME`          | —                   | Obrigatória se `ICE_PROVIDER=metered`.                                                                                                                                                                                     |
+| `REACTION_EMOJIS`           | 😂 🔥 💀 👏 ❤️ 😮   | **Emojis dos botões de reação**, separados por espaço ou vírgula (1 a 12, um emoji cada). Reinicie o servidor para valer.                                                                                                  |
+| `NAME_ALIASES`              | (vazio)             | **Apelidos forçados pelo servidor**, em JSON: `{"nome digitado":"nome exibido"}`. Veja abaixo.                                                                                                                             |
 | `METERED_API_KEY`           | —                   | Obrigatória se `ICE_PROVIDER=metered`.                                                                                                                                                                                     |
+
+**Apelidos (`NAME_ALIASES`).** Quem entra com um dos nomes configurados aparece para **todos** (e para si mesmo) com o apelido. A comparação ignora maiúsculas, acentos, espaços e `_` `-` `.`, então `Stan God`, `STAN_GOD` e `stangod` valem o mesmo nome, mas só a igualdade exata conta (`stanley` não vira o apelido de `stan`). Se duas pessoas caírem no mesmo apelido, a segunda recebe "nome já em uso". Exemplo no `.env`:
+
+```env
+NAME_ALIASES='{"fulano":"Apelido","fulano2":"Apelido"}'
+```
+
+Por ficar no `.env`, os nomes e apelidos **não vão para o repositório público**. Depois de mudar, reinicie o servidor (`DESLIGAR.bat` e `LIGAR.bat`).
 
 > O arquivo `.env` **nunca** deve ir para o git (já está no `.gitignore`).
 
@@ -323,14 +334,25 @@ servidores de relay.
 
 ## 8. Áudio do sistema sem eco (Discord)
 
-O "áudio do sistema" leva **tudo** que toca no PC, inclusive a voz dos amigos no Discord, e quem assiste
-ouviria a própria voz de volta. A opção "Áudio do sistema" vem **desligada** por padrão e, ao ligá-la,
-o app abre um **guia passo a passo** (usando o VB-CABLE, um dispositivo de áudio virtual gratuito) que
-também pode ser reaberto pelo link "Ver guia para evitar o eco". A versão escrita está em
+O "áudio do sistema" leva o que toca no **dispositivo padrão** do Windows. Se a voz dos amigos no Discord
+sair pelo mesmo caminho, quem assiste ouve a própria voz de volta. A opção "Áudio do sistema" vem
+**desligada** por padrão e, ao ligá-la, o app abre um **guia passo a passo** que também pode ser reaberto
+pelo link "Ver guia para evitar o eco". A versão escrita está em
 [`docs/audio-discord.md`](docs/audio-discord.md).
 
-Alternativa sem configurar nada: compartilhe uma **aba** do Chrome/Edge em vez da tela. O navegador
-captura só o áudio daquela aba.
+**A regra:** o que sai pelo dispositivo padrão é compartilhado, então o Discord precisa sair por **outro**
+dispositivo. Mandar o Discord "para o fone" **só adianta se o dispositivo padrão do Windows não for o
+próprio fone**. O que fazer depende do seu caso (clique no ícone de som da barra de tarefas: o dispositivo
+mostrado é o padrão):
+
+- **Caso A, o padrão já é virtual (FxSound, CABLE, Voicemeeter):** não precisa instalar nada. Deixe-o
+  como padrão e configure o Discord com saída direto no seu fone real (Voz e vídeo → Dispositivo de
+  saída). Quem usa **FxSound** cai aqui.
+- **Caso B, o padrão é o seu fone (Windows comum):** é preciso criar um dispositivo padrão separado com
+  o **VB-CABLE** (passo a passo no guia). O VB-CABLE **não convive** com o FxSound, que impede trocar o
+  dispositivo padrão.
+- Sem configurar nada: compartilhe uma **aba** do Chrome/Edge em vez da tela. O navegador captura só o
+  áudio daquela aba.
 
 ## 9. Checklist de testes manuais
 

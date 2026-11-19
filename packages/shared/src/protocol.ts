@@ -7,6 +7,11 @@ export const MAX_WS_MESSAGE_BYTES = 64 * 1024;
 export const NAME_MAX_LENGTH = 30;
 export const SDP_MAX_LENGTH = 32 * 1024;
 export const CANDIDATE_MAX_LENGTH = 2 * 1024;
+// Reações padrão (ordem = ordem dos botões). O dono troca a lista com REACTION_EMOJIS no .env;
+// o servidor informa a lista em uso no `joined`. Ele também limita a frequência.
+export const DEFAULT_REACTION_EMOJIS: readonly string[] = ['😂', '🔥', '💀', '👏', '❤️', '😮'];
+export const MAX_REACTION_EMOJIS = 12;
+const REACTION_MAX_LENGTH = 20;
 
 // ---------------------------------------------------------------------------
 // Campos básicos
@@ -30,6 +35,16 @@ export function isValidName(raw: string): boolean {
     !BIDI_CONTROLS.test(name) &&
     /[^\s\p{Cc}\p{Cf}]/u.test(name)
   );
+}
+
+/**
+ * Uma reação é um único emoji (um "caractere" visível só, mesmo que composto, como bandeiras ou
+ * 👨‍👩‍👧), sem texto: o servidor não repassa texto livre.
+ */
+export function isValidReactionEmoji(value: string): boolean {
+  if (value.length === 0 || value.length > REACTION_MAX_LENGTH) return false;
+  if (!/\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(value)) return false;
+  return [...new Intl.Segmenter().segment(value)].length === 1;
 }
 
 // `trim` roda antes das verificações de tamanho.
@@ -107,6 +122,17 @@ export const sharingMessageSchema = z.strictObject({
   active: z.boolean(),
 });
 
+// Só emojis da lista: o servidor não repassa texto livre (evita abuso e mensagens grandes).
+export const reactionEmojiSchema = z.string().refine(isValidReactionEmoji, {
+  message: 'invalid reaction emoji',
+});
+export type ReactionEmoji = string;
+
+export const reactionToServerSchema = z.strictObject({
+  type: z.literal('reaction'),
+  emoji: reactionEmojiSchema,
+});
+
 export const pingMessageSchema = z.strictObject({ type: z.literal('ping') });
 export const leaveMessageSchema = z.strictObject({ type: z.literal('leave') });
 
@@ -114,6 +140,7 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
   joinMessageSchema,
   signalToServerSchema,
   sharingMessageSchema,
+  reactionToServerSchema,
   pingMessageSchema,
   leaveMessageSchema,
 ]);
@@ -138,6 +165,11 @@ export type ErrorCode = z.infer<typeof errorCodeSchema>;
 export const joinedMessageSchema = z.strictObject({
   type: z.literal('joined'),
   selfId: peerIdSchema,
+  // Nome com que o servidor registrou a pessoa (pode diferir do digitado: apelidos configurados).
+  // Opcional só por compatibilidade: um servidor antigo (ainda sem apelidos) não o envia.
+  selfName: nameSchema.optional(),
+  // Reações em uso nesta sala (REACTION_EMOJIS do servidor). Opcional: servidor antigo não envia.
+  reactions: z.array(reactionEmojiSchema).max(MAX_REACTION_EMOJIS).optional(),
   peers: z.array(peerInfoSchema),
 });
 
@@ -163,6 +195,12 @@ export const peerSharingMessageSchema = z.strictObject({
   active: z.boolean(),
 });
 
+export const reactionToClientSchema = z.strictObject({
+  type: z.literal('reaction'),
+  from: peerIdSchema,
+  emoji: reactionEmojiSchema,
+});
+
 export const errorMessageSchema = z.strictObject({
   type: z.literal('error'),
   code: errorCodeSchema,
@@ -177,6 +215,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   peerLeftMessageSchema,
   signalToClientSchema,
   peerSharingMessageSchema,
+  reactionToClientSchema,
   errorMessageSchema,
   pongMessageSchema,
 ]);

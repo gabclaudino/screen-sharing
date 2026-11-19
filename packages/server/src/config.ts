@@ -1,6 +1,8 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
+import { parseNameAliases, type NameAliases } from './names';
+import { parseReactionEmojis } from './reactions';
 
 const PLACEHOLDER_PASSWORD = 'troque-isto';
 const PLACEHOLDER_SECRET = 'string-aleatoria-longa';
@@ -11,6 +13,10 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 export type IceProviderName = 'cloudflare' | 'metered' | 'none';
 
 export interface Config {
+  /** Apelidos forçados pelo servidor (NAME_ALIASES): nome digitado → nome exibido. */
+  nameAliases: NameAliases;
+  /** Emojis dos botões de reação (REACTION_EMOJIS), na ordem de exibição. */
+  reactionEmojis: readonly string[];
   nodeEnv: 'production' | 'development';
   host: string;
   port: number;
@@ -79,6 +85,8 @@ const envSchema = z
     CLOUDFLARE_TURN_API_TOKEN: z.string().optional(),
     METERED_APP_NAME: z.string().optional(),
     METERED_API_KEY: z.string().optional(),
+    NAME_ALIASES: z.string().optional(),
+    REACTION_EMOJIS: z.string().optional(),
   })
   .superRefine((env, ctx) => {
     const requireKeys = (provider: string, keys: (keyof typeof env)[]) => {
@@ -121,7 +129,29 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   }
   const e = parsed.data;
 
+  let nameAliases: NameAliases;
+  try {
+    nameAliases = parseNameAliases(e.NAME_ALIASES);
+  } catch (error) {
+    throw new ConfigError(
+      `Configuração inválida (confira o .env):
+  - NAME_ALIASES: ${error instanceof Error ? error.message : 'inválido'}`,
+    );
+  }
+
+  let reactionEmojis: string[];
+  try {
+    reactionEmojis = parseReactionEmojis(e.REACTION_EMOJIS);
+  } catch (error) {
+    throw new ConfigError(
+      `Configuração inválida (confira o .env):
+  - REACTION_EMOJIS: ${error instanceof Error ? error.message : 'inválido'}`,
+    );
+  }
+
   return {
+    nameAliases,
+    reactionEmojis,
     nodeEnv: e.NODE_ENV,
     host: e.HOST,
     port: e.PORT,

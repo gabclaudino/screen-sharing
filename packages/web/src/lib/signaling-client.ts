@@ -3,6 +3,7 @@ import {
   type ClientMessage,
   type ErrorCode,
   type PeerInfo,
+  type ReactionEmoji,
   type ServerMessage,
   type SignalData,
 } from '@screenshare/shared';
@@ -33,11 +34,18 @@ export type CloseReason =
 export interface SignalingEvents {
   status: SignalingStatus;
   /** Disparado a cada join confirmado, inclusive depois de uma reconexão (novo `selfId`). */
-  joined: { selfId: string; peers: PeerInfo[] };
+  joined: {
+    selfId: string;
+    selfName: string | undefined;
+    /** Emojis de reação desta sala; `undefined` em servidor antigo (usa a lista padrão). */
+    reactions: string[] | undefined;
+    peers: PeerInfo[];
+  };
   'peer-joined': PeerInfo;
   'peer-left': string;
   signal: { from: string; data: SignalData };
   'peer-sharing': { id: string; active: boolean };
+  reaction: { from: string; emoji: ReactionEmoji };
   /** Erro enviado pelo servidor (ROOM_FULL, NAME_TAKEN, ...). */
   error: { code: ErrorCode; message: string };
   /** A conexão caiu e o cliente vai tentar reconectar sozinho. */
@@ -131,6 +139,10 @@ export class SignalingClient extends TypedEmitter<SignalingEvents> {
     return this.sendWhenConnected({ type: 'signal', to, data });
   }
 
+  sendReaction(emoji: ReactionEmoji): boolean {
+    return this.sendWhenConnected({ type: 'reaction', emoji });
+  }
+
   sendSharing(active: boolean): boolean {
     return this.sendWhenConnected({ type: 'sharing', active });
   }
@@ -198,7 +210,12 @@ export class SignalingClient extends TypedEmitter<SignalingEvents> {
       case 'joined':
         this.attempt = 0;
         this.setStatus('connected');
-        this.emit('joined', { selfId: message.selfId, peers: message.peers });
+        this.emit('joined', {
+          selfId: message.selfId,
+          selfName: message.selfName,
+          reactions: message.reactions,
+          peers: message.peers,
+        });
         return;
       case 'peer-joined':
         this.emit('peer-joined', message.peer);
@@ -211,6 +228,9 @@ export class SignalingClient extends TypedEmitter<SignalingEvents> {
         return;
       case 'peer-sharing':
         this.emit('peer-sharing', { id: message.id, active: message.active });
+        return;
+      case 'reaction':
+        this.emit('reaction', { from: message.from, emoji: message.emoji });
         return;
       case 'error':
         this.emit('error', { code: message.code, message: message.message });

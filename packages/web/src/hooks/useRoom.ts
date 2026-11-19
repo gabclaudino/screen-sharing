@@ -1,3 +1,4 @@
+import type { ReactionEmoji } from '@screenshare/shared';
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 import type { Session } from '../lib/auth';
 import { IceServerStore } from '../lib/ice';
@@ -8,6 +9,8 @@ import { buildWsUrl, SignalingClient } from '../lib/signaling-client';
 export interface UseRoomParams {
   name: string;
   session: Session;
+  /** Reação de outra pessoa chegou (a UI mostra o emoji subindo na tela). */
+  onReaction?: (from: string, emoji: ReactionEmoji) => void;
 }
 
 export interface UseRoomResult {
@@ -15,12 +18,14 @@ export interface UseRoomResult {
   /** Começa (stream) ou para (`null`) de enviar a tela local a todos os peers. */
   setLocalStream: (stream: MediaStream | null) => void;
   setMaxBitrate: (bitsPerSecond: number) => void;
+  /** Manda a reação a todos; `false` se não estiver conectado. */
+  sendReaction: (emoji: ReactionEmoji) => boolean;
 }
 
 const DEFAULT_BITRATE = 2_500_000;
 
 /** Liga SignalingClient + PeerManager ao estado da UI e cuida do ciclo de vida de ambos. */
-export function useRoom({ name, session }: UseRoomParams): UseRoomResult {
+export function useRoom({ name, session, onReaction }: UseRoomParams): UseRoomResult {
   const [state, dispatch] = useReducer(roomReducer, undefined, createInitialRoomState);
 
   const clientRef = useRef<SignalingClient | null>(null);
@@ -30,9 +35,12 @@ export function useRoom({ name, session }: UseRoomParams): UseRoomResult {
   const localStreamRef = useRef<MediaStream | null>(null);
   const bitrateRef = useRef(DEFAULT_BITRATE);
 
+  const onReactionRef = useRef(onReaction);
+
   useEffect(() => {
     sessionRef.current = session;
-  }, [session]);
+    onReactionRef.current = onReaction;
+  }, [session, onReaction]);
 
   useEffect(() => {
     const client = new SignalingClient({
@@ -57,10 +65,10 @@ export function useRoom({ name, session }: UseRoomParams): UseRoomResult {
 
     const off = [
       client.on('status', (phase) => dispatch({ type: 'phase', phase })),
-      client.on('joined', ({ selfId, peers }) => {
+      client.on('joined', ({ selfId, selfName, reactions, peers }) => {
         // selfId novo (primeira vez ou reconexão): todas as conexões P2P são refeitas.
         manager.setSelf(selfId, peers);
-        dispatch({ type: 'joined', selfId, peers });
+        dispatch({ type: 'joined', selfId, selfName, reactions, peers });
       }),
       client.on('peer-joined', (peer) => {
         manager.addPeer(peer);
@@ -71,6 +79,7 @@ export function useRoom({ name, session }: UseRoomParams): UseRoomResult {
         dispatch({ type: 'peer-left', id });
       }),
       client.on('peer-sharing', ({ id, active }) => dispatch({ type: 'peer-sharing', id, active })),
+      client.on('reaction', ({ from, emoji }) => onReactionRef.current?.(from, emoji)),
       client.on('signal', ({ from, data }) => manager.handleSignal(from, data)),
       client.on('error', ({ code }) =>
         // SHARE_BUSY não encerra nada: só avisa a UI para parar a captura local.
@@ -118,5 +127,10 @@ export function useRoom({ name, session }: UseRoomParams): UseRoomResult {
     managerRef.current?.setMaxBitrate(bitsPerSecond);
   }, []);
 
-  return { state, setLocalStream, setMaxBitrate };
+  const sendReaction = useCallback(
+    (emoji: ReactionEmoji) => clientRef.current?.sendReaction(emoji) ?? false,
+    [],
+  );
+
+  return { state, setLocalStream, setMaxBitrate, sendReaction };
 }

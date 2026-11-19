@@ -90,6 +90,33 @@ describe('loadConfig', () => {
     expect(loadConfig({ ...valid, ICE_PROVIDER: 'none' }).ice.cloudflare).toBeUndefined();
   });
 
+  it('NAME_ALIASES: sem a variável não há apelidos; com ela, as chaves são normalizadas', () => {
+    expect(loadConfig(valid).nameAliases.size).toBe(0);
+    const config = loadConfig({ ...valid, NAME_ALIASES: '{"Stan God":"Fulano","STAN":"Fulano"}' });
+    expect(config.nameAliases.get('stangod')).toBe('Fulano');
+    expect(config.nameAliases.get('stan')).toBe('Fulano');
+  });
+
+  it('REACTION_EMOJIS: padrão sem a variável; com ela, a lista do dono na ordem dada', () => {
+    expect(loadConfig(valid).reactionEmojis).toHaveLength(6);
+    expect(loadConfig({ ...valid, REACTION_EMOJIS: '🐸, 🍕 🔥' }).reactionEmojis).toEqual([
+      '🐸',
+      '🍕',
+      '🔥',
+    ]);
+  });
+
+  it('REACTION_EMOJIS inválida falha na subida, dizendo a variável e o motivo', () => {
+    expect(messageOf({ ...valid, REACTION_EMOJIS: '🔥 oi' })).toMatch(
+      /REACTION_EMOJIS.*"oi" não é um emoji/s,
+    );
+  });
+
+  it('NAME_ALIASES inválida falha na subida, dizendo a variável e o motivo', () => {
+    expect(messageOf({ ...valid, NAME_ALIASES: '{nope' })).toMatch(/NAME_ALIASES.*JSON válido/s);
+    expect(messageOf({ ...valid, NAME_ALIASES: '{"a":""}' })).toMatch(/NAME_ALIASES.*inválido/s);
+  });
+
   it('lista todos os problemas dos campos básicos de uma vez', () => {
     const message = messageOf({ PORT: '70000' });
     for (const key of ['PORT', 'ALLOWED_ORIGIN', 'ACCESS_PASSWORD', 'SESSION_SECRET']) {

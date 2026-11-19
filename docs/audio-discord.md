@@ -1,106 +1,96 @@
 # Compartilhar áudio sem eco quando você está numa call (Discord)
 
-Guia para **Windows 10/11** com **Chrome ou Edge**.
+Guia para **Windows 10/11** com **Chrome ou Edge**. O mesmo texto aparece dentro do app, na janela
+que abre ao marcar "Áudio do sistema".
 
 ## O problema
 
-O “áudio do sistema” que o navegador captura é **tudo o que toca no seu PC**, inclusive a voz dos
-seus amigos vindo do Discord. Essa voz entra no stream, e quem assiste ouve a própria fala de volta,
-atrasada. O navegador não consegue separar um programa do resto.
+O "áudio do sistema" que o navegador captura é o que toca no **dispositivo padrão** do Windows. Se a
+voz dos seus amigos (Discord) sair por ele, ela entra no stream, e quem assiste ouve a própria fala
+de volta, atrasada. Para o Discord ficar de fora, ele precisa sair por **outro** dispositivo.
 
-## A solução: tirar o Discord do áudio que é capturado
-
-Usamos o **VB-CABLE**, um dispositivo de áudio virtual gratuito. Ele vira a “saída padrão” do
-Windows, e o Discord é mandado direto para o seu fone, por fora dele:
+> **Atenção:** mandar o Discord "para o fone" só adianta se o dispositivo padrão do Windows for
+> **outro** (como o FxSound ou o VB-CABLE). Se o padrão já é o seu fone, os dois saem pelo mesmo
+> lugar e a voz continua indo para o stream.
 
 ```
-Jogo / vídeo / música ──► CABLE Input (saída padrão) ──┬──► Chrome captura (vai para o stream)
-                                                       └──► "Ouvir este dispositivo" ──► seu fone
-
-Discord (voz dos amigos) ───────────────────────────────────► seu fone (direto, não é capturado)
+Jogo / vídeo ──► dispositivo padrão (virtual) ──┬──► navegador captura (stream)
+                                                └──► seu fone
+Discord (amigos) ───────────────────────────────► seu fone (direto, fora do stream)
 ```
 
-Resultado: o stream leva o som do jogo/vídeo, e **não** leva a voz dos amigos. Você continua ouvindo
-tudo normalmente.
+## Qual é o seu caso?
 
-## Passo a passo
+Clique no ícone de som da barra de tarefas: o dispositivo mostrado é o **padrão**.
 
-### 1. Instalar o VB-CABLE
+- Se for **virtual** (FxSound Audio Enhancer, CABLE Input, Voicemeeter...): **Caso A**.
+- Se for o **seu fone ou alto-falante** de verdade: **Caso B**.
 
-1. Baixe o **VB-CABLE Driver Pack** em <https://vb-audio.com/Cable/> (gratuito; é “donationware”).
-2. Extraia o zip, clique com o botão direito em `VBCABLE_Setup_x64.exe` e escolha **Executar como
-   administrador**, depois **Install Driver**.
-3. **Reinicie o PC.**
+## Caso A: o padrão já é virtual (FxSound, CABLE, Voicemeeter)
 
-### 2. Definir o CABLE como saída padrão
+Não precisa instalar nada. Vale para quem usa o **FxSound**, que já se coloca como dispositivo
+padrão.
 
-- **Windows 11:** Configurações → Sistema → Som → **Saída** → selecione **CABLE Input (VB-Audio
-  Virtual Cable)**.
-- **Windows 10:** Configurações → Sistema → Som → em “Escolha seu dispositivo de saída”, selecione
-  **CABLE Input (VB-Audio Virtual Cable)**.
+1. **Mande o Discord direto para o fone.** Configurações de usuário → **Voz e vídeo** →
+   **Dispositivo de saída** = o seu fone real (**não** "Padrão" e não o FxSound). Se o Discord já
+   estava aberto, feche e abra de novo.
+2. **Deixe a saída padrão do Windows como está** (FxSound ligado, por exemplo). O equalizador
+   continua valendo para o som do jogo/vídeo; a voz do Discord vai direto ao fone, sem passar por
+   ele.
+3. **Compartilhe a tela inteira.** No app, com "Áudio do sistema" marcado, clique em **Compartilhar
+   tela**. No seletor do navegador, escolha a aba **Tela inteira** e marque **Compartilhar áudio do
+   sistema**.
 
-> Daqui até o passo 3 você **não vai ouvir nada**. É normal: o som está indo para o cabo virtual.
+## Caso B: o padrão é o seu fone (Windows comum)
 
-### 3. Ouvir o cabo no seu fone
+Aqui é preciso criar o dispositivo padrão separado, com o **VB-CABLE**, um dispositivo de áudio
+virtual gratuito.
 
-1. Pressione `Win + R`, digite `mmsys.cpl` e dê Enter.
-2. Abra a aba **Gravação**.
-3. Dê dois cliques em **CABLE Output** para abrir as propriedades.
-4. Vá na aba **Escutar**.
-5. Marque **Ouvir este dispositivo**.
-6. Em **Reproduzir através deste dispositivo**, escolha o seu **fone ou alto-falante real**.
-7. Clique em **Aplicar** e **OK**. Você volta a ouvir o som do PC.
+1. Baixe o **VB-CABLE Driver Pack** em <https://vb-audio.com/Cable/>, execute
+   `VBCABLE_Setup_x64.exe` **como administrador** e **reinicie** o PC.
+2. Saída padrão do Windows = **CABLE Input** (Configurações → Sistema → Som → Saída). Você fica sem
+   som até o próximo passo.
+3. `Win + R` → `mmsys.cpl` → aba **Gravação** → dois cliques em **CABLE Output** → aba **Escutar** →
+   marque **Ouvir este dispositivo** e escolha o seu fone real em "Reproduzir através deste
+   dispositivo".
+4. **Discord direto para o fone** (passo 1 do Caso A) e compartilhe a tela inteira com o áudio
+   (passo 3 do Caso A).
 
-### 4. Mandar o Discord direto para o fone
+## Teste (nos dois casos)
 
-1. No Discord: Configurações de usuário → **Voz e vídeo**.
-2. Em **Dispositivo de saída**, escolha o seu **fone real**. **Não deixe em “Padrão”**, porque o
-   “Padrão” agora é o CABLE.
-3. O **microfone (entrada)** não muda.
-
-Se o Discord já estava aberto, feche e abra de novo para ele assumir a nova saída.
-
-### 5. Compartilhar no ScreenShare
-
-1. Marque **Áudio do sistema**.
-2. Clique em **Compartilhar tela**.
-3. No seletor do navegador, escolha a aba **Tela inteira** e marque **Compartilhar áudio do
-   sistema** (canto inferior esquerdo da janela).
-
-### 6. Testar
-
-Peça a um amigo para assistir enquanto outro fala no Discord e você toca um vídeo:
-
-- ele deve ouvir o vídeo;
-- ele **não** deve ouvir a própria voz (nem a de ninguém da call) no stream.
+No Discord, em Voz e vídeo, ligue o **Teste de microfone** (ele devolve a sua voz no fone) e veja
+pelo celular, ou peça a um amigo para falar. Quem assiste deve ouvir o vídeo e **não** a voz da call.
 
 ## Dicas e limitações
 
-- **Volume:** o volume do Windows agora controla o volume do CABLE, ou seja, também o que vai no
-  stream. Deixe-o em **100%** e ajuste o volume no próprio fone ou no Discord.
-- **Tudo, menos o Discord, entra no stream:** Spotify, notificações do Windows, outros programas. Feche
-  o que você não quer expor.
-- **Latência:** “Ouvir este dispositivo” soma algumas dezenas de milissegundos no que você ouve. Em
-  geral não se nota.
+- **Tudo que toca no dispositivo padrão entra no stream** (Spotify, notificações...). Para tirar um
+  programa do stream, mande-o direto ao fone: Configurações → Sistema → Som → **Mixer de volume** (ou
+  **Preferências de volume do aplicativo**) → Saída do programa = o seu fone real.
+- **No Caso B** o volume do Windows passa a controlar o que vai no stream: deixe em 100% e ajuste
+  pelo fone ou pelo Discord.
+- **FxSound e VB-CABLE não convivem como padrão:** o FxSound impede trocar o dispositivo padrão. Quem
+  usa FxSound segue o Caso A e não precisa do VB-CABLE.
 - **Janela x tela inteira:** no Windows, o Chrome/Edge normalmente só oferece áudio do sistema ao
-  compartilhar a **tela inteira**. Ao compartilhar uma única janela, costuma não haver opção de
-  áudio.
-- **Só quer mostrar algo que roda no navegador** (YouTube, filme, streaming)? Compartilhe uma **aba**
-  em vez da tela. O navegador captura só o áudio daquela aba, então nada disso é necessário.
+  compartilhar a **tela inteira**. Ao compartilhar uma única janela, costuma não haver opção de áudio.
+- **Só quer mostrar algo do navegador** (YouTube, filme, streaming)? Compartilhe uma **aba**: o
+  navegador captura só o áudio dela, e nada disso é necessário.
 - **Seu microfone não é compartilhado** pelo app: só o áudio do sistema, e só se você marcar a opção.
 
 ## Ainda ouvem eco?
 
-1. Confira se a saída do Discord **não** está em “Padrão”.
-2. Abra o **mixer de volume** (clique direito no ícone de som → “Abrir o Mixer de volume”) com o
-   Discord falando: a barra dele deve estar sob o seu fone real, não sob o CABLE.
-3. Reinicie o Discord depois de mudar a saída.
-4. Confirme que você escolheu **Tela inteira** e marcou **Compartilhar áudio do sistema** no seletor.
+1. Confira se o dispositivo padrão do Windows é **diferente** do que o Discord usa (veja o aviso no
+   topo).
+2. Confira se a saída do Discord **não** está em "Padrão" nem no FxSound/CABLE, e reinicie o Discord
+   depois de trocar.
+3. Abra o **Mixer de volume** (clique direito no ícone de som) com o Discord falando: a barra dele
+   deve estar sob o seu fone real.
+4. Confirme que escolheu **Tela inteira** e marcou **Compartilhar áudio do sistema** no seletor.
+5. Se continuar, compartilhe uma **aba** do navegador em vez da tela.
 
-## Como desfazer
+## Como desfazer (Caso B)
 
-1. Volte a saída padrão do Windows para o seu fone ou alto-falante.
+1. Volte a saída padrão do Windows ao seu fone ou alto-falante.
 2. Em `mmsys.cpl` → Gravação → CABLE Output → Escutar, desmarque **Ouvir este dispositivo**.
-3. No Discord, volte a saída para **Padrão**.
-
-Se quiser, pode desinstalar o VB-CABLE depois pelo “Adicionar ou remover programas”.
+3. No Discord, volte a saída para "Padrão".
+4. Se quiser, desinstale em Configurações → Aplicativos → "VBCABLE, The Virtual Audio Cable" (botão
+   **Remove Driver**) e reinicie.

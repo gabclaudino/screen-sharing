@@ -23,6 +23,8 @@ describe('roomReducer', () => {
     expect(createInitialRoomState()).toEqual({
       phase: 'idle',
       selfId: null,
+      selfName: null,
+      reactions: null,
       peers: {},
       everJoined: false,
       iceFallback: false,
@@ -34,9 +36,16 @@ describe('roomReducer', () => {
 
   it('joined guarda selfId, marca everJoined e cria os peers como connecting', () => {
     const state = run([
-      { type: 'joined', selfId: ID_A, peers: [{ id: ID_B, name: 'Bia', sharing: true }] },
+      {
+        type: 'joined',
+        selfId: ID_A,
+        selfName: 'Eu',
+        reactions: undefined,
+        peers: [{ id: ID_B, name: 'Bia', sharing: true }],
+      },
     ]);
     expect(state.selfId).toBe(ID_A);
+    expect(state.selfName).toBe('Eu');
     expect(state.everJoined).toBe(true);
     expect(state.peers[ID_B]).toEqual({
       id: ID_B,
@@ -47,12 +56,36 @@ describe('roomReducer', () => {
     });
   });
 
+  it('joined sem selfName (servidor antigo) deixa selfName nulo, e a UI usa o nome digitado', () => {
+    const state = run([
+      { type: 'joined', selfId: ID_A, selfName: undefined, reactions: undefined, peers: [] },
+    ]);
+    expect(state.selfName).toBeNull();
+  });
+
+  it('joined guarda a lista de reações do servidor; sem ela (servidor antigo) fica nula', () => {
+    const custom = run([
+      { type: 'joined', selfId: ID_A, selfName: 'Eu', reactions: ['🐸', '🍕'], peers: [] },
+    ]);
+    expect(custom.reactions).toEqual(['🐸', '🍕']);
+    const old = run([
+      { type: 'joined', selfId: ID_A, selfName: 'Eu', reactions: undefined, peers: [] },
+    ]);
+    expect(old.reactions).toBeNull();
+  });
+
   it('um novo joined (reconexão) substitui os peers e limpa o erro', () => {
     const state = run([
-      { type: 'joined', selfId: ID_A, peers: [{ id: ID_B, name: 'Bia', sharing: false }] },
+      {
+        type: 'joined',
+        selfId: ID_A,
+        selfName: 'Eu',
+        reactions: undefined,
+        peers: [{ id: ID_B, name: 'Bia', sharing: false }],
+      },
       { type: 'peer-stream', id: ID_B, stream },
       { type: 'error', code: 'INVALID' },
-      { type: 'joined', selfId: ID_B, peers: [] },
+      { type: 'joined', selfId: ID_B, selfName: 'Eu', reactions: undefined, peers: [] },
     ]);
     expect(state.selfId).toBe(ID_B);
     expect(state.peers).toEqual({});

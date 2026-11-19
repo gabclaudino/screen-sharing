@@ -523,6 +523,76 @@ describe('servidor (WebSocket)', () => {
     second.close();
   });
 
+  it('reaction: todos os outros recebem com o `from` do servidor; quem enviou não', async () => {
+    const a = await TestClient.connect(running, await getToken(running));
+    const b = await TestClient.connect(running, await getToken(running));
+    const c = await TestClient.connect(running, await getToken(running));
+    const joinedA = await a.join('Ana');
+    await b.join('Bia');
+    await a.next(); // peer-joined (Bia)
+    await c.join('Caio');
+    await a.next(); // peer-joined (Caio)
+    await b.next();
+
+    a.send({ type: 'reaction', emoji: '🔥' });
+    expect(await b.next()).toEqual({ type: 'reaction', from: joinedA.selfId, emoji: '🔥' });
+    expect(await c.next()).toEqual({ type: 'reaction', from: joinedA.selfId, emoji: '🔥' });
+    await a.expectSilence();
+    a.close();
+    b.close();
+    c.close();
+  });
+
+  it('reaction antes do join → INVALID; texto no lugar do emoji → conexão fechada (1008)', async () => {
+    const a = await TestClient.connect(running, await getToken(running));
+    a.send({ type: 'reaction', emoji: '🔥' });
+    expect(await a.next()).toMatchObject({ type: 'error', code: 'INVALID' });
+    a.close();
+
+    const b = await TestClient.connect(running, await getToken(running));
+    await b.join('Bia');
+    b.send({ type: 'reaction', emoji: 'oi' });
+    expect((await b.closed).code).toBe(1008);
+  });
+
+  it('o joined traz a lista de reações padrão; emoji válido mas fora da lista é ignorado', async () => {
+    const a = await TestClient.connect(running, await getToken(running));
+    const b = await TestClient.connect(running, await getToken(running));
+    const joinedA = await a.join('Ana');
+    expect(joinedA.reactions).toHaveLength(6);
+    await b.join('Bia');
+    await a.next(); // peer-joined
+
+    a.send({ type: 'reaction', emoji: '🍕' }); // emoji de verdade, mas não está na lista
+    await b.expectSilence();
+    a.send({ type: 'ping' });
+    expect(await a.next()).toEqual({ type: 'pong' }); // e a conexão segue de pé
+    a.close();
+    b.close();
+  });
+
+  it('reaction em excesso é descartada em silêncio, sem derrubar a conexão', async () => {
+    const a = await TestClient.connect(running, await getToken(running));
+    const b = await TestClient.connect(running, await getToken(running));
+    await a.join('Ana');
+    await b.join('Bia');
+    await a.next(); // peer-joined
+
+    for (let i = 0; i < 8; i += 1) a.send({ type: 'reaction', emoji: '👏' });
+    let received = 0;
+    for (let i = 0; i < 5; i += 1) {
+      expect((await b.next()).type).toBe('reaction');
+      received += 1;
+    }
+    await b.expectSilence(); // as 3 últimas foram ignoradas
+    expect(received).toBe(5);
+
+    a.send({ type: 'ping' });
+    expect(await a.next()).toEqual({ type: 'pong' }); // Ana continua conectada
+    a.close();
+    b.close();
+  });
+
   it('ping → pong', async () => {
     const a = await TestClient.connect(running, await getToken(running));
     a.send({ type: 'ping' });
@@ -553,6 +623,134 @@ describe('servidor (WebSocket)', () => {
     const a = await TestClient.connect(running, await getToken(running));
     a.send(JSON.stringify({ type: 'join', name: 'a'.repeat(70 * 1024) }));
     expect((await a.closed).code).toBe(1009);
+  });
+});
+
+describe('reações configuradas (REACTION_EMOJIS)', () => {
+  it('o joined traz a lista do dono, que vale também para o envio', async () => {
+    const running = await startApp({ REACTION_EMOJIS: '🐸 🍕' });
+    const a = await TestClient.connect(running, await getToken(running));
+    const b = await TestClient.connect(running, await getToken(running));
+    const joinedA = await a.join('Ana');
+    expect(joinedA.reactions).toEqual(['🐸', '🍕']);
+    await b.join('Bia');
+    await a.next(); // peer-joined
+
+    a.send({ type: 'reaction', emoji: '🍕' });
+    expect(await b.next()).toEqual({ type: 'reaction', from: joinedA.selfId, emoji: '🍕' });
+    a.send({ type: 'reaction', emoji: '🔥' }); // estava na lista padrão, mas não na do dono
+    await b.expectSilence();
+    a.close();
+    b.close();
+    await running.app.close();
+  });
+});
+
+describe('apelidos (NAME_ALIASES)', () => {
+  const ALIASES = JSON.stringify({ stan: 'Apelido X', stangod: 'Apelido X' });
+
+  /** Entra com `typed`, devolve o nome registrado pelo servidor e sai (liberando a vaga). */
+  async function joinAndLeave(running: Running, typed: string): Promise<string | undefined> {
+    const client = await TestClient.connect(running, await getToken(running));
+    const joined = await client.join(typed);
+    client.close();
+    await client.closed;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    return joined.selfName;
+  }
+
+  it('stan e stangod, em qualquer grafia (maiúsculas, espaços, separadores), viram o apelido', async () => {
+    const running = await startApp({ NAME_ALIASES: ALIASES });
+    try {
+      for (const typed of [
+        'stan',
+        'Stan',
+        'STAN',
+        'stangod',
+        'StanGod',
+        'STANGOD',
+        'Stan God',
+        'stan_god',
+        ' stan ',
+      ]) {
+        expect(await joinAndLeave(running, typed), typed).toBe('Apelido X');
+      }
+    } finally {
+      await running.app.close();
+    }
+  });
+
+  it('todos veem o apelido: quem já estava, quem entra depois e a própria pessoa', async () => {
+    const running = await startApp({ NAME_ALIASES: ALIASES });
+    try {
+      const observer = await TestClient.connect(running, await getToken(running));
+      await observer.join('Ana');
+      const stan = await TestClient.connect(running, await getToken(running));
+      const joined = await stan.join('StanGod');
+
+      expect(joined.selfName).toBe('Apelido X'); // a própria pessoa
+      expect(joined.peers.map((p) => p.name)).toEqual(['Ana']);
+      expect(await observer.next()).toMatchObject({
+        type: 'peer-joined',
+        peer: { id: joined.selfId, name: 'Apelido X' }, // quem já estava
+      });
+
+      const late = await TestClient.connect(running, await getToken(running));
+      const lateJoined = await late.join('Caio');
+      expect(lateJoined.peers.map((p) => p.name).sort()).toEqual(['Ana', 'Apelido X']); // quem entra depois
+      observer.close();
+      stan.close();
+      late.close();
+    } finally {
+      await running.app.close();
+    }
+  });
+
+  it('os dois nomes viram o mesmo apelido, então o segundo recebe NAME_TAKEN', async () => {
+    const running = await startApp({ NAME_ALIASES: ALIASES });
+    try {
+      const first = await TestClient.connect(running, await getToken(running));
+      const second = await TestClient.connect(running, await getToken(running));
+      await first.join('stan');
+      second.send({ type: 'join', name: 'stangod' });
+      expect(await second.next()).toMatchObject({ type: 'error', code: 'NAME_TAKEN' });
+      first.close();
+      second.close();
+    } finally {
+      await running.app.close();
+    }
+  });
+
+  it('nomes parecidos não são alterados, e sem a variável nada muda', async () => {
+    const withAliases = await startApp({ NAME_ALIASES: ALIASES });
+    try {
+      expect(await joinAndLeave(withAliases, 'stanley')).toBe('stanley');
+      expect(await joinAndLeave(withAliases, 'Ana')).toBe('Ana');
+    } finally {
+      await withAliases.app.close();
+    }
+    const plain = await startApp();
+    try {
+      expect(await joinAndLeave(plain, 'stan')).toBe('stan');
+    } finally {
+      await plain.app.close();
+    }
+  });
+
+  it('reconexão: o mesmo login entrando de novo com o apelido substitui a conexão antiga', async () => {
+    const running = await startApp({ NAME_ALIASES: ALIASES });
+    try {
+      const token = await getToken(running);
+      const first = await TestClient.connect(running, token);
+      await first.join('stan');
+      const second = await TestClient.connect(running, token);
+      const joined = await second.join('stan');
+      expect(joined.selfName).toBe('Apelido X');
+      expect((await first.closed).code).toBe(4001);
+      second.close();
+    } finally {
+      await running.app.close();
+    }
   });
 });
 

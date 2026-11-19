@@ -7,11 +7,12 @@ import {
 import type { RawData, WebSocket } from 'ws';
 import type { Config } from './config';
 import type { Logger } from './logger';
+import { resolveDisplayName } from './names';
 import { Room, toPeerInfo } from './rooms';
 import { RateLimiter } from './security';
 
 export interface SignalingOptions {
-  config: Pick<Config, 'maxPeersPerRoom' | 'wsMsgRatePerSec'>;
+  config: Pick<Config, 'maxPeersPerRoom' | 'wsMsgRatePerSec' | 'nameAliases' | 'reactionEmojis'>;
   logger: Logger;
   /** Intervalo da varredura de conexões ociosas. */
   heartbeatIntervalMs: number;
@@ -36,7 +37,11 @@ interface Connection {
   peerId: string | undefined;
   lastSeen: number;
   limiter: RateLimiter;
+  reactionLimiter: RateLimiter;
 }
+
+// No máximo 5 reações por segundo por pessoa; o que passar disso é ignorado.
+const REACTIONS_PER_SEC = 5;
 
 const WS_CLOSE_POLICY = 1008;
 const WS_CLOSE_REPLACED = 4001;
@@ -92,7 +97,9 @@ export function createSignaling(options: SignalingOptions) {
     // a vez nesse meio-tempo (o próprio login anterior não conta, ele será substituído).
     const shareBusy = msg.sharing === true && room.sharer(conn.sid) !== undefined;
     const result = room.join({
-      name: msg.name,
+      // O servidor decide o nome exibido: apelidos configurados valem para todos, inclusive
+      // para a própria pessoa (que recebe o nome final em `selfName`).
+      name: resolveDisplayName(msg.name, config.nameAliases),
       sid: conn.sid,
       sharing: msg.sharing === true && !shareBusy,
     });
@@ -117,7 +124,13 @@ export function createSignaling(options: SignalingOptions) {
 
     conn.peerId = peer.id;
     byPeerId.set(peer.id, conn);
-    send(conn.ws, { type: 'joined', selfId: peer.id, peers: others.map(toPeerInfo) });
+    send(conn.ws, {
+      type: 'joined',
+      selfId: peer.id,
+      selfName: peer.name,
+      reactions: [...config.reactionEmojis],
+      peers: others.map(toPeerInfo),
+    });
     broadcast(peer.id, { type: 'peer-joined', peer: toPeerInfo(peer) });
     // Avisa o cliente para parar a captura que ele ainda tem ativa.
     if (shareBusy) sendError(conn, 'SHARE_BUSY', 'Outra pessoa já está compartilhando');
@@ -135,6 +148,19 @@ export function createSignaling(options: SignalingOptions) {
       case 'leave':
         leaveRoom(conn);
         return;
+      case 'reaction': {
+        const self = conn.peerId === undefined ? undefined : room.get(conn.peerId);
+        if (!self) {
+          sendError(conn, 'INVALID', 'Entre na sala primeiro');
+          return;
+        }
+        // Emoji fora da lista configurada (ex.: aba aberta antes de o dono trocar a lista) e excesso
+        // de reações são descartados em silêncio: não vale derrubar a conexão por isso.
+        if (!config.reactionEmojis.includes(msg.emoji)) return;
+        if (!conn.reactionLimiter.hit('reaction')) return;
+        broadcast(self.id, { type: 'reaction', from: self.id, emoji: msg.emoji });
+        return;
+      }
       case 'signal':
       case 'sharing': {
         const self = conn.peerId === undefined ? undefined : room.get(conn.peerId);
@@ -169,6 +195,7 @@ export function createSignaling(options: SignalingOptions) {
       peerId: undefined,
       lastSeen: Date.now(),
       limiter: new RateLimiter(config.wsMsgRatePerSec, 1000),
+      reactionLimiter: new RateLimiter(REACTIONS_PER_SEC, 1000),
     };
     connections.add(conn);
 

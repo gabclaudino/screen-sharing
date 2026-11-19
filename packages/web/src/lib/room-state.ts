@@ -14,6 +14,10 @@ export interface PeerView {
 export interface RoomState {
   phase: SignalingStatus;
   selfId: string | null;
+  /** Nome com que o servidor nos registrou (pode ser um apelido configurado). */
+  selfName: string | null;
+  /** Emojis dos botões de reação, como o servidor configurou; `null` = lista padrão. */
+  reactions: string[] | null;
   peers: Record<string, PeerView>;
   /** true depois do primeiro `joined`; distingue "conectando pela 1ª vez" de "reconectando". */
   everJoined: boolean;
@@ -28,7 +32,13 @@ export interface RoomState {
 
 export type RoomAction =
   | { type: 'phase'; phase: SignalingStatus }
-  | { type: 'joined'; selfId: string; peers: PeerInfo[] }
+  | {
+      type: 'joined';
+      selfId: string;
+      selfName: string | undefined;
+      reactions: string[] | undefined;
+      peers: PeerInfo[];
+    }
   | { type: 'peer-joined'; peer: PeerInfo }
   | { type: 'peer-left'; id: string }
   | { type: 'peer-sharing'; id: string; active: boolean }
@@ -42,6 +52,8 @@ export type RoomAction =
 export const createInitialRoomState = (): RoomState => ({
   phase: 'idle',
   selfId: null,
+  selfName: null,
+  reactions: null,
   peers: {},
   everJoined: false,
   iceFallback: false,
@@ -74,6 +86,8 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
       return {
         ...state,
         selfId: action.selfId,
+        selfName: action.selfName ?? null,
+        reactions: action.reactions ?? null,
         everJoined: true,
         lastError: null,
         peers: Object.fromEntries(action.peers.map((peer) => [peer.id, toView(peer)])),

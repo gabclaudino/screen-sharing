@@ -102,6 +102,7 @@ Validação de campos: `name` tem 1–30 chars após `trim`, sem caracteres de c
 | `join` | `name`, `sharing?: boolean` | Entra na sala única (não há campo de sala; um `join` com `room` é inválido). `sharing` é `true` ao reentrar após reconexão enquanto ainda compartilha |
 | `signal` | `to`, `data` | Repassa a um peer: `{ gen: number, description?: RTCSessionDescriptionInit, candidate?: RTCIceCandidateInit, reset?: true }`. `sdp` limitado a 32 KB e `candidate` a 2 KB (validado no schema) |
 | `sharing` | `active: boolean` | Informa que começou/parou de compartilhar |
+| `reaction` | `emoji` | Reação rápida; `emoji` é um único emoji (texto é mensagem inválida → 1008); se não estiver na lista `REACTION_EMOJIS` do servidor (padrão 😂 🔥 💀 👏 ❤️ 😮) é descartado em silêncio. Limite de 5 por segundo por pessoa (o excesso é descartado sem erro) |
 | `ping` | — | Heartbeat |
 | `leave` | — | Sai da sala |
 
@@ -109,11 +110,12 @@ Validação de campos: `name` tem 1–30 chars após `trim`, sem caracteres de c
 
 | `type` | Campos | Descrição |
 |---|---|---|
-| `joined` | `selfId`, `peers: {id, name, sharing}[]` | Confirmação + lista de quem já está na sala |
+| `joined` | `selfId`, `selfName?`, `reactions?`, `peers: {id, name, sharing}[]` | Confirmação + lista de quem já está na sala. `selfName` é o nome com que o servidor registrou a pessoa (pode ser um apelido forçado por `NAME_ALIASES`). `reactions` é a lista de emojis de reação em uso (`REACTION_EMOJIS`; ausente em servidor antigo → cliente usa a padrão) |
 | `peer-joined` | `peer: {id, name, sharing}` | Novo participante |
 | `peer-left` | `id` | Participante saiu |
 | `signal` | `from`, `data` | Repasse de sinalização |
 | `peer-sharing` | `id`, `active` | Estado de compartilhamento de um peer |
+| `reaction` | `from`, `emoji` | Reação de outra pessoa (não volta para quem enviou) |
 | `error` | `code`, `message` | `ROOM_FULL`, `NAME_TAKEN`, `ALREADY_JOINED`, `SHARE_BUSY`, `RATE_LIMITED`, `INVALID` |
 | `pong` | — | Resposta ao heartbeat |
 
@@ -121,6 +123,7 @@ Regras:
 - Senha errada ou token ausente/expirado **não** gera mensagem WS: o upgrade é recusado com HTTP 401 e o cliente, que não enxerga o corpo da resposta de um upgrade falho, trata a falha de conexão tentando `POST /api/login` de novo (ver seção 9).
 - Após `error` com `ROOM_FULL` ou `NAME_TAKEN` o servidor mantém a conexão aberta (o cliente pode tentar outro nome ou aguardar uma vaga). `ALREADY_JOINED` ocorre se `join` chegar com a conexão já na sala (ignorado, sem efeito). `RATE_LIMITED` fecha a conexão.
 - O nome é único na sala (comparação case-insensitive); duplicado → `NAME_TAKEN`.
+- **Apelidos:** `NAME_ALIASES` (JSON no `.env`) faz o servidor registrar quem digitar certos nomes com um apelido, para todos e para a própria pessoa (`selfName`). A comparação ignora maiúsculas, acentos, espaços e `_ - .` e só vale para igualdade exata. A unicidade é checada sobre o nome já resolvido (dois nomes com o mesmo apelido → o segundo recebe `NAME_TAKEN`). Fica no `.env` para não expor os nomes no repositório público.
 - IDs de peer gerados no servidor (`crypto.randomUUID()`), válidos só durante a conexão.
 - `signal` só é repassado entre quem já entrou na sala; destino inexistente é ignorado em silêncio.
 - Limite de **6 peers** na sala (`MAX_PEERS_PER_ROOM`, configurável).

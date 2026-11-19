@@ -1,8 +1,17 @@
-import { useCallback, useEffect, useState } from 'react';
+import { DEFAULT_REACTION_EMOJIS, type ReactionEmoji } from '@screenshare/shared';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRoom } from '../hooks/useRoom';
 import { useScreenShare, type ContentHint } from '../hooks/useScreenShare';
 import type { Session } from '../lib/auth';
 import { hasSeenAudioGuide, markAudioGuideSeen } from '../lib/profile';
+import {
+  FLOATER_LIFETIME_MS,
+  pushFloater,
+  randomLeft,
+  REACTION_COOLDOWN_MS,
+  removeFloater,
+  type Floater,
+} from '../lib/reactions';
 import {
   allPeers,
   describeClose,
@@ -13,6 +22,8 @@ import {
 import { AudioGuideDialog } from './AudioGuideDialog';
 import { LogOutIcon } from './icons';
 import { Controls } from './Controls';
+import { ReactionBar } from './ReactionBar';
+import { ReactionOverlay } from './ReactionOverlay';
 import { VideoTile } from './VideoTile';
 
 interface Props {
@@ -23,7 +34,45 @@ interface Props {
 }
 
 export function Room({ name, session, onLeave }: Props) {
-  const { state, setLocalStream, setMaxBitrate } = useRoom({ name, session });
+  const [floaters, setFloaters] = useState<Floater[]>([]);
+  const nextFloaterId = useRef(0);
+  const lastReactionAt = useRef(0);
+  const peerNames = useRef<Record<string, string>>({});
+
+  const addFloater = useCallback((emoji: ReactionEmoji, label: string) => {
+    nextFloaterId.current += 1;
+    const floater = { id: nextFloaterId.current, emoji, label, left: randomLeft() };
+    setFloaters((list) => pushFloater(list, floater));
+    // Rede de segurança: aba em segundo plano pode não disparar o fim da animação.
+    setTimeout(() => setFloaters((list) => removeFloater(list, floater.id)), FLOATER_LIFETIME_MS);
+  }, []);
+  const removeDoneFloater = useCallback(
+    (id: number) => setFloaters((list) => removeFloater(list, id)),
+    [],
+  );
+  const handleRemoteReaction = useCallback(
+    (from: string, emoji: ReactionEmoji) => addFloater(emoji, peerNames.current[from] ?? ''),
+    [addFloater],
+  );
+
+  const { state, setLocalStream, setMaxBitrate, sendReaction } = useRoom({
+    name,
+    session,
+    onReaction: handleRemoteReaction,
+  });
+  useEffect(() => {
+    peerNames.current = Object.fromEntries(Object.values(state.peers).map((p) => [p.id, p.name]));
+  }, [state.peers]);
+
+  function react(emoji: ReactionEmoji) {
+    const now = Date.now();
+    if (now - lastReactionAt.current < REACTION_COOLDOWN_MS) return;
+    // Só mostra para si mesmo o que realmente foi enviado.
+    if (!sendReaction(emoji)) return;
+    lastReactionAt.current = now;
+    addFloater(emoji, 'você');
+  }
+
   const handleStop = useCallback(() => setLocalStream(null), [setLocalStream]);
   const share = useScreenShare({ onStart: setLocalStream, onStop: handleStop });
 
@@ -76,6 +125,8 @@ export function Room({ name, session, onLeave }: Props) {
     share.setContentHint(hint); // vale na hora, mesmo durante o compartilhamento
   }
 
+  // O servidor pode ter trocado o nome digitado por um apelido: o que vale é o nome registrado.
+  const myName = state.selfName ?? name;
   const tiles = sharingPeers(state);
   const peers = allPeers(state);
   const showLocalTile = showLocalPreview && share.stream !== null;
@@ -118,7 +169,7 @@ export function Room({ name, session, onLeave }: Props) {
       <main className="stage">
         {showGrid ? (
           <div className="grid">
-            {showLocalTile ? <VideoTile stream={share.stream} label={name} local /> : null}
+            {showLocalTile ? <VideoTile stream={share.stream} label={myName} local /> : null}
             {tiles.map((peer) => (
               <VideoTile
                 key={peer.id}
@@ -155,7 +206,7 @@ export function Room({ name, session, onLeave }: Props) {
         <h2>Participantes ({peers.length + 1})</h2>
         <ul className="participants">
           <li>
-            <span>{name} (você)</span>
+            <span>{myName} (você)</span>
             {share.sharing ? <span className="badge badge-sharing">compartilhando</span> : null}
           </li>
           {peers.map((peer) => (
@@ -219,8 +270,14 @@ export function Room({ name, session, onLeave }: Props) {
           onShowLocalPreviewChange={setShowLocalPreview}
           onToggleShare={toggleShare}
         />
+        <ReactionBar
+          emojis={state.reactions ?? DEFAULT_REACTION_EMOJIS}
+          onReact={react}
+          disabled={state.phase !== 'connected'}
+        />
       </footer>
 
+      <ReactionOverlay floaters={floaters} onDone={removeDoneFloater} />
       <AudioGuideDialog open={guideOpen} onClose={() => setGuideOpen(false)} />
     </div>
   );

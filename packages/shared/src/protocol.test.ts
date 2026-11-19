@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   CANDIDATE_MAX_LENGTH,
   NAME_MAX_LENGTH,
+  DEFAULT_REACTION_EMOJIS,
+  isValidReactionEmoji,
   SDP_MAX_LENGTH,
   parseClientMessage,
   parseServerMessage,
@@ -129,9 +131,17 @@ describe('parseServerMessage', () => {
     const msg = {
       type: 'joined',
       selfId: ID_A,
+      selfName: 'Ana',
       peers: [{ id: ID_B, name: 'Bia', sharing: true }],
     };
     expect(parseServerMessage(JSON.stringify(msg))).toEqual({ ok: true, message: msg });
+  });
+
+  it('aceita joined sem selfName (servidor antigo) e rejeita selfName inválido', () => {
+    const base = { type: 'joined', selfId: ID_A, peers: [] };
+    expect(parseServerMessage(JSON.stringify(base)).ok).toBe(true);
+    expect(parseServerMessage(JSON.stringify({ ...base, selfName: 'Ana' })).ok).toBe(true);
+    expect(parseServerMessage(JSON.stringify({ ...base, selfName: '' })).ok).toBe(false);
   });
 
   it('aceita peer-joined, peer-left, peer-sharing, signal e pong', () => {
@@ -145,6 +155,39 @@ describe('parseServerMessage', () => {
     for (const msg of messages) {
       expect(parseServerMessage(JSON.stringify(msg)).ok).toBe(true);
     }
+  });
+
+  it('reaction: um único emoji, nos dois sentidos', () => {
+    for (const emoji of [...DEFAULT_REACTION_EMOJIS, '🐸', '🇧🇷', '👨‍👩‍👧', '👍🏽']) {
+      expect(parseClientMessage(JSON.stringify({ type: 'reaction', emoji })).ok).toBe(true);
+      expect(parseServerMessage(JSON.stringify({ type: 'reaction', from: ID_B, emoji })).ok).toBe(
+        true,
+      );
+    }
+    for (const emoji of ['oi', '', '<b>x</b>', '🔥🔥', '🔥 ', '1', 1, null]) {
+      expect(parseClientMessage(JSON.stringify({ type: 'reaction', emoji })).ok).toBe(false);
+    }
+    expect(parseClientMessage(JSON.stringify({ type: 'reaction' })).ok).toBe(false);
+    expect(parseClientMessage(JSON.stringify({ type: 'reaction', emoji: '🔥', to: ID_B })).ok).toBe(
+      false,
+    );
+    expect(parseServerMessage(JSON.stringify({ type: 'reaction', emoji: '🔥' })).ok).toBe(false);
+  });
+
+  it('isValidReactionEmoji rejeita texto e sequências longas', () => {
+    expect(isValidReactionEmoji('🔥')).toBe(true);
+    expect(isValidReactionEmoji('a')).toBe(false);
+    expect(isValidReactionEmoji('🔥'.repeat(21))).toBe(false);
+  });
+
+  it('joined aceita reactions opcional (até 12 emojis válidos)', () => {
+    const base = { type: 'joined', selfId: ID_A, peers: [] };
+    expect(parseServerMessage(JSON.stringify(base)).ok).toBe(true);
+    expect(parseServerMessage(JSON.stringify({ ...base, reactions: ['🔥', '😂'] })).ok).toBe(true);
+    expect(parseServerMessage(JSON.stringify({ ...base, reactions: ['oi'] })).ok).toBe(false);
+    expect(
+      parseServerMessage(JSON.stringify({ ...base, reactions: Array(13).fill('🔥') })).ok,
+    ).toBe(false);
   });
 
   it('aceita apenas os códigos de erro definidos', () => {
