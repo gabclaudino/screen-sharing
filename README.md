@@ -430,3 +430,7 @@ docs/audio-discord.md            guia do áudio sem eco
 - **Essa pasta não vai para o git** (está no `.gitignore`), porque o repositório é público e as fotos são de pessoas. Num clone novo as fotos simplesmente não aparecem. Lembre que a tela de entrada é visível para **qualquer pessoa que souber o endereço**, mesmo sem a senha; o site pede aos buscadores para não indexá-lo (`noindex` e `robots.txt`).
 
 A especificação completa do projeto está em [`SPEC.md`](SPEC.md).
+
+## Licença
+
+[MIT](LICENSE) © 2026 Gabriel Claudino. A licença vale para o código; as fotos do fundo da tela de entrada não fazem parte do repositório e continuam sendo de quem as tirou.
