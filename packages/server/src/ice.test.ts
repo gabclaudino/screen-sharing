@@ -199,6 +199,21 @@ describe('IceService', () => {
     expect(p.calls).toBe(2); // tenta de novo depois do backoff
   });
 
+  it('loga a causa de rede (error.cause.code) quando o fetch falha', async () => {
+    const logger = fakeLogger();
+    const p = provider(async () => {
+      throw new TypeError('fetch failed', {
+        cause: Object.assign(new Error('x'), { code: 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY' }),
+      });
+    });
+    await new IceService(p, { logger }).getIceServers();
+    expect(logger.errors[0]?.[1]).toMatchObject({
+      provider: 'fake',
+      message: 'fetch failed',
+      cause: 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+    });
+  });
+
   it('se o provedor volta a funcionar, passa a entregar TURN', async () => {
     let now = 0;
     let ok = false;

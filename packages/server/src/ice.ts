@@ -158,9 +158,14 @@ export class IceService {
       return servers;
     } catch (error) {
       this.failedUntil = this.now() + this.failureBackoffMs;
+      // `fetch failed` sozinho não diz nada: a causa (ex.: UNABLE_TO_GET_ISSUER_CERT_LOCALLY
+      // quando um antivírus inspeciona o HTTPS, ENOTFOUND, ETIMEDOUT) vem em `error.cause`.
+      const cause =
+        error instanceof Error ? (error.cause as { code?: unknown } | undefined) : undefined;
       this.logger.error('ice_provider_failed', {
         provider: provider.name,
         message: error instanceof Error ? error.message : 'unknown',
+        ...(typeof cause?.code === 'string' ? { cause: cause.code } : {}),
       });
       return STUN_SERVERS;
     }
