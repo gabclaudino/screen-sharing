@@ -17,6 +17,12 @@ export interface SignalingOptions {
   heartbeatIntervalMs: number;
   /** Sem nenhuma mensagem (ping) por este tempo → conexão encerrada. */
   heartbeatTimeoutMs: number;
+  /** Máximo de conexões abertas por login (padrão 3: uma aba + reconexões em andamento). */
+  maxConnectionsPerSession?: number;
+  /** Máximo de conexões abertas no servidor todo (padrão: 5× o limite da sala). */
+  maxConnections?: number;
+  /** Quanto esperar o `join` depois de abrir a conexão (padrão 15 s). */
+  joinTimeoutMs?: number;
 }
 
 export interface ConnectionContext {
@@ -48,6 +54,9 @@ function send(ws: WebSocket, message: ServerMessage): void {
 export function createSignaling(options: SignalingOptions) {
   const { config, logger } = options;
   const room = new Room(config.maxPeersPerRoom);
+  const maxPerSession = options.maxConnectionsPerSession ?? 3;
+  const maxConnections = options.maxConnections ?? config.maxPeersPerRoom * 5;
+  const joinTimeoutMs = options.joinTimeoutMs ?? 15_000;
   const connections = new Set<Connection>();
   const byPeerId = new Map<string, Connection>();
 
@@ -163,6 +172,14 @@ export function createSignaling(options: SignalingOptions) {
     };
     connections.add(conn);
 
+    // Conexão autenticada que nunca entra na sala só gasta recursos: encerra.
+    const joinTimer = setTimeout(() => {
+      if (conn.peerId !== undefined) return;
+      logger.warn('join_timeout');
+      ws.close(WS_CLOSE_POLICY, 'join timeout');
+    }, joinTimeoutMs);
+    joinTimer.unref();
+
     ws.on('message', (data, isBinary) => {
       conn.lastSeen = Date.now();
       if (!conn.limiter.hit('msg')) {
@@ -190,6 +207,7 @@ export function createSignaling(options: SignalingOptions) {
     });
 
     ws.on('close', () => {
+      clearTimeout(joinTimer);
       connections.delete(conn);
       leaveRoom(conn);
     });
@@ -215,5 +233,13 @@ export function createSignaling(options: SignalingOptions) {
     for (const conn of connections) conn.ws.close(1001, 'server shutting down');
   };
 
-  return { handleConnection, close, room };
+  /** Antes do upgrade: há espaço para mais uma conexão deste login e do servidor? */
+  const canAccept = (sid: string): boolean => {
+    if (connections.size >= maxConnections) return false;
+    let count = 0;
+    for (const conn of connections) if (conn.sid === sid) count += 1;
+    return count < maxPerSession;
+  };
+
+  return { handleConnection, close, room, canAccept };
 }

@@ -12,13 +12,33 @@ export const CANDIDATE_MAX_LENGTH = 2 * 1024;
 // Campos básicos
 // ---------------------------------------------------------------------------
 
-// `trim` roda antes das verificações de tamanho; caracteres de controle são proibidos.
+// Marcas de direção (U+202A–202E, U+2066–2069) permitiriam escrever o nome "ao contrário" e
+// se passar por outra pessoa na lista.
+const BIDI_CONTROLS = /[‪-‮⁦-⁩]/u;
+
+/**
+ * Regras do nome de exibição (valem no cliente e no servidor): 1 a 30 caracteres depois do trim,
+ * sem caracteres de controle nem marcas de direção, e pelo menos um caractere visível (um nome
+ * só de espaços invisíveis, como U+200B, não identificaria ninguém).
+ */
+export function isValidName(raw: string): boolean {
+  const name = raw.trim();
+  return (
+    name.length >= 1 &&
+    name.length <= NAME_MAX_LENGTH &&
+    !/\p{Cc}/u.test(name) &&
+    !BIDI_CONTROLS.test(name) &&
+    /[^\s\p{Cc}\p{Cf}]/u.test(name)
+  );
+}
+
+// `trim` roda antes das verificações de tamanho.
 export const nameSchema = z
   .string()
   .trim()
   .min(1)
   .max(NAME_MAX_LENGTH)
-  .refine((value) => !/\p{Cc}/u.test(value), { message: 'name contains control characters' });
+  .refine(isValidName, { message: 'invalid display name' });
 
 export const peerIdSchema = z.uuid();
 

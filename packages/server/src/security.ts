@@ -151,8 +151,11 @@ export function buildCsp(allowedOrigin: string): string {
     "media-src 'self' blob:",
     `connect-src 'self' ${wsOrigin}`,
     "frame-ancestors 'none'",
+    "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
+    // Em HTTPS, qualquer recurso http:// vira https:// em vez de ficar bloqueado/misto.
+    ...(url.protocol === 'https:' ? ['upgrade-insecure-requests'] : []),
   ].join('; ');
 }
 
@@ -164,4 +167,13 @@ export function applySecurityHeaders(
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('Permissions-Policy', 'display-capture=(self)');
+  // Impede que outro site abra esta página numa janela e a controle, ou carregue seus recursos.
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+  res.setHeader('X-Frame-Options', 'DENY');
+  // HSTS só faz sentido (e só é aceito pelos navegadores) em HTTPS. Sem includeSubDomains
+  // nem preload: o domínio pode hospedar outras coisas.
+  if (config.allowedOrigin.startsWith('https://')) {
+    res.setHeader('Strict-Transport-Security', 'max-age=15552000');
+  }
 }

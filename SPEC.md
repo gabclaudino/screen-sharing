@@ -182,6 +182,14 @@ Uso privado entre amigos, então sem sistema de contas.
 - Limite de tamanho de mensagem WS (64 KB) e de tamanho de nome (30 chars).
 - Cabeçalhos: `Content-Security-Policy` restritiva (base: `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self' wss://<host de ALLOWED_ORIGIN>; frame-ancestors 'none'; base-uri 'self'; form-action 'self'` — listar `wss://` explicitamente porque alguns navegadores não tratam `'self'` como cobrindo WS), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Permissions-Policy: display-capture=(self)`.
 - Sem logs de conteúdo de sinalização (SDP contém IPs); logar apenas eventos (join/leave/erro).
+- **Endurecimento (fase 8):**
+  - Cabeçalhos extras: `Cross-Origin-Opener-Policy` e `Cross-Origin-Resource-Policy: same-origin`, `X-Frame-Options: DENY`, CSP com `object-src 'none'`, e em HTTPS também `upgrade-insecure-requests` e `Strict-Transport-Security: max-age=15552000` (sem `includeSubDomains`/`preload`). Aplicados a todas as respostas, inclusive 404 e erros.
+  - Limites de conexão WS: no máximo 3 por login e `5 × MAX_PEERS_PER_ROOM` no servidor (excesso → HTTP 429 no upgrade); conexão que não faz `join` em 15 s é encerrada (1008).
+  - Timeouts HTTP: `requestTimeout` 30 s, `keepAliveTimeout` 95 s e `headersTimeout` 100 s (o keep-alive fica acima dos ~90 s do `cloudflared`, evitando 502 por socket reutilizado após o Node fechá-lo).
+  - Nome de exibição: sem caracteres de controle nem marcas de direção (U+202A–202E, U+2066–2069, usadas para falsificar nomes) e com pelo menos um caractere visível. A regra fica em `shared` e vale no cliente e no servidor.
+  - Processo: `unhandledRejection` é registrado sem derrubar a sala; `uncaughtException` registra e sai com erro (o gerenciador do serviço sobe uma instância limpa); o encerramento tem prazo de 5 s.
+  - Upgrade com URL malformada → 400 (nunca derruba o processo).
+  - Cliente: `ErrorBoundary` (tela de erro com "Recarregar" em vez de página em branco), checagem de suporte a WebRTC antes de pedir a senha, e a captura de tela é liberada se a sala fechar enquanto o seletor do navegador está aberto; vários cliques em "Compartilhar" abrem um só seletor.
 
 ## 9. Heartbeat e reconexão
 

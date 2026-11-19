@@ -26,6 +26,10 @@ export interface AppOptions {
   fetchImpl?: typeof fetch;
   /** Por quanto tempo reaproveitar as credenciais TURN (padrão 5 min). */
   iceCacheMs?: number;
+  /** Limites de conexões WS e prazo para o join (ver createSignaling). */
+  maxConnectionsPerSession?: number;
+  maxConnections?: number;
+  joinTimeoutMs?: number;
 }
 
 const MAX_LOGIN_BODY_BYTES = 1024;
@@ -75,6 +79,11 @@ export function createApp(config: Config, options: AppOptions = {}) {
     logger,
     heartbeatIntervalMs: options.heartbeatIntervalMs ?? 15_000,
     heartbeatTimeoutMs: options.heartbeatTimeoutMs ?? 60_000,
+    ...(options.maxConnectionsPerSession === undefined
+      ? {}
+      : { maxConnectionsPerSession: options.maxConnectionsPerSession }),
+    ...(options.maxConnections === undefined ? {} : { maxConnections: options.maxConnections }),
+    ...(options.joinTimeoutMs === undefined ? {} : { joinTimeoutMs: options.joinTimeoutMs }),
   });
   const iceService = new IceService(createIceProvider(config.ice, options.fetchImpl), {
     logger,
@@ -204,6 +213,12 @@ export function createApp(config: Config, options: AppOptions = {}) {
     });
   });
 
+  // Timeouts contra clientes lentos/travados (slowloris). O keep-alive fica acima dos ~90 s em que
+  // o cloudflared reaproveita conexões, senão ele reutiliza um socket que o Node já fechou (502).
+  server.keepAliveTimeout = 95_000;
+  server.headersTimeout = 100_000;
+  server.requestTimeout = 30_000;
+
   const rejectUpgrade = (socket: Duplex, status: number, text: string): void => {
     socket.write(`HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
     socket.destroy();
@@ -212,7 +227,14 @@ export function createApp(config: Config, options: AppOptions = {}) {
   server.on('upgrade', (req, socket, head) => {
     socket.on('error', () => socket.destroy());
     // Não logar req.url: o token vai na query string.
-    const url = new URL(req.url ?? '/', 'http://localhost');
+    let url: URL;
+    try {
+      url = new URL(req.url ?? '/', 'http://localhost');
+    } catch {
+      // Um throw aqui, fora de qualquer try/catch, derrubaria o processo todo.
+      rejectUpgrade(socket, 400, 'Bad Request');
+      return;
+    }
     if (url.pathname !== '/ws') {
       rejectUpgrade(socket, 404, 'Not Found');
       return;
@@ -226,6 +248,11 @@ export function createApp(config: Config, options: AppOptions = {}) {
     const session = token ? verifyToken(token, config.sessionSecret) : null;
     if (!session) {
       rejectUpgrade(socket, 401, 'Unauthorized');
+      return;
+    }
+    if (!signaling.canAccept(session.sid)) {
+      logger.warn('ws_connection_limit');
+      rejectUpgrade(socket, 429, 'Too Many Requests');
       return;
     }
     wss.handleUpgrade(req, socket, head, (ws) => {

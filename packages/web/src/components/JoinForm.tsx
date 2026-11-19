@@ -2,6 +2,7 @@ import { useMemo, useState, type FormEvent } from 'react';
 import { NAME_MAX_LENGTH } from '@screenshare/shared';
 import { loadStoredSession, login, LoginError, storeSession, type Session } from '../lib/auth';
 import { isValidName, loadProfile, saveProfile } from '../lib/profile';
+import { isRoomSupported } from '../lib/support';
 
 export interface JoinParams {
   name: string;
@@ -31,6 +32,14 @@ export function JoinForm({ notice, onJoin }: Props) {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+
+    // Sem WebRTC não há como assistir nem compartilhar: avisa antes de pedir a senha.
+    if (!isRoomSupported()) {
+      setError(
+        'Este navegador não suporta WebRTC. Use uma versão recente do Chrome, Edge, Firefox ou Safari.',
+      );
+      return;
+    }
 
     const trimmedName = name.trim();
     if (!isValidName(trimmedName)) {

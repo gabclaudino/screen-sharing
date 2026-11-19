@@ -1,4 +1,5 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { connect } from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -552,6 +553,109 @@ describe('servidor (WebSocket)', () => {
     const a = await TestClient.connect(running, await getToken(running));
     a.send(JSON.stringify({ type: 'join', name: 'a'.repeat(70 * 1024) }));
     expect((await a.closed).code).toBe(1009);
+  });
+});
+
+describe('endurecimento', () => {
+  it('limita as conexões WS por login (4ª → 429) e libera quando uma fecha', async () => {
+    const running = await startApp();
+    try {
+      const token = await getToken(running);
+      const clients = await Promise.all([1, 2, 3].map(() => TestClient.connect(running, token)));
+      const url = `${running.ws}?token=${token}`;
+      expect(await upgradeStatus(url, { Origin: ORIGIN })).toBe(429);
+
+      // outro login não é afetado
+      const other = await TestClient.connect(running, await getToken(running));
+      other.close();
+
+      clients[0]?.close();
+      await clients[0]?.closed;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const again = await TestClient.connect(running, token);
+      again.close();
+      clients.forEach((c) => c.close());
+    } finally {
+      await running.app.close();
+    }
+  });
+
+  it('limita o total de conexões WS do servidor → 429', async () => {
+    const running = await startApp({}, { maxConnections: 2 });
+    try {
+      const a = await TestClient.connect(running, await getToken(running));
+      const b = await TestClient.connect(running, await getToken(running));
+      const url = `${running.ws}?token=${await getToken(running)}`;
+      expect(await upgradeStatus(url, { Origin: ORIGIN })).toBe(429);
+      a.close();
+      b.close();
+    } finally {
+      await running.app.close();
+    }
+  });
+
+  it('fecha a conexão que não faz join a tempo, sem afetar quem entrou', async () => {
+    const running = await startApp({}, { joinTimeoutMs: 100 });
+    try {
+      const idle = await TestClient.connect(running, await getToken(running));
+      const joined = await TestClient.connect(running, await getToken(running));
+      await joined.join('Ana');
+
+      expect((await idle.closed).code).toBe(1008);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(joined.socket.readyState).toBe(WebSocket.OPEN);
+      joined.close();
+    } finally {
+      await running.app.close();
+    }
+  });
+
+  it('um alvo de upgrade malformado → 400 e o servidor continua de pé', async () => {
+    const running = await startApp();
+    try {
+      const response = await new Promise<string>((resolve, reject) => {
+        const socket = connect(running.port, '127.0.0.1');
+        let data = '';
+        socket.on('data', (chunk) => (data += chunk.toString()));
+        socket.on('close', () => resolve(data));
+        socket.on('error', reject);
+        socket.write(
+          'GET //[ HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n' +
+            'Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n',
+        );
+      });
+      expect(response).toMatch(/^HTTP\/1\.1 400/);
+      expect((await fetch(`${running.http}/`)).status).toBe(200); // ainda atende
+    } finally {
+      await running.app.close();
+    }
+  });
+
+  it('configura os timeouts HTTP contra clientes lentos', async () => {
+    const running = await startApp();
+    try {
+      expect(running.app.server.requestTimeout).toBe(30_000);
+      expect(running.app.server.keepAliveTimeout).toBe(95_000);
+      // headersTimeout precisa ficar acima do keepAliveTimeout
+      expect(running.app.server.headersTimeout).toBeGreaterThan(95_000);
+    } finally {
+      await running.app.close();
+    }
+  });
+
+  it('todos os tipos de resposta levam os cabeçalhos de segurança', async () => {
+    const running = await startApp();
+    try {
+      for (const path of ['/', '/api/nada', '/assets/app-abc123.js', '/nao-existe.js']) {
+        const res = await fetch(`${running.http}${path}`);
+        expect(res.headers.get('cross-origin-opener-policy'), path).toBe('same-origin');
+        expect(res.headers.get('cross-origin-resource-policy'), path).toBe('same-origin');
+        expect(res.headers.get('x-frame-options'), path).toBe('DENY');
+        expect(res.headers.get('content-security-policy'), path).toContain("object-src 'none'");
+      }
+    } finally {
+      await running.app.close();
+    }
   });
 });
 

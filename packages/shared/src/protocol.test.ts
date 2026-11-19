@@ -17,6 +17,22 @@ describe('parseClientMessage', () => {
     expect(result).toEqual({ ok: true, message: { type: 'join', name: 'Ana' } });
   });
 
+  it.each(['José', 'Ana Clara', 'João 🎮', '👨‍👩‍👧 família', '日本語'])(
+    'aceita o nome %s (acentos, emoji e outros alfabetos)',
+    (name) => {
+      expect(parseClientMessage(JSON.stringify({ type: 'join', name })).ok).toBe(true);
+    },
+  );
+
+  it.each([
+    ['marca de direção RLO (U+202E)', 'Ana‮gnp'],
+    ['isolamento de direção (U+2067)', '⁧Ana'],
+    ['só espaço de largura zero', '​​'],
+    ['só caracteres invisíveis e espaços', ' ‍ ⁠ '],
+  ])('rejeita nome com %s', (_label, name) => {
+    expect(parseClientMessage(JSON.stringify({ type: 'join', name })).ok).toBe(false);
+  });
+
   it('aceita join com sharing', () => {
     const result = parseClientMessage(JSON.stringify({ type: 'join', name: 'Ana', sharing: true }));
     expect(result.ok).toBe(true);

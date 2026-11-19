@@ -1,4 +1,7 @@
-import { NAME_MAX_LENGTH } from '@screenshare/shared';
+import { isValidName } from '@screenshare/shared';
+
+// A regra do nome é a mesma do servidor (fica em @screenshare/shared).
+export { isValidName };
 
 export interface Profile {
   name: string;
@@ -16,11 +19,6 @@ function defaultStorage(): StorageLike | undefined {
     return undefined;
   }
 }
-
-export const isValidName = (name: string): boolean => {
-  const trimmed = name.trim();
-  return trimmed.length >= 1 && trimmed.length <= NAME_MAX_LENGTH && !/\p{Cc}/u.test(trimmed);
-};
 
 /** Lembra o nome (nunca a senha) entre visitas. */
 export function loadProfile(storage = defaultStorage()): Partial<Profile> {

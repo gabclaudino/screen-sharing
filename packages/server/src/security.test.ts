@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applySecurityHeaders,
   buildCsp,
   createToken,
   getClientIp,
@@ -141,5 +142,45 @@ describe('buildCsp', () => {
 
   it('usa ws:// quando a origem é http', () => {
     expect(buildCsp('http://localhost:3000')).toContain('ws://localhost:3000');
+  });
+});
+
+describe('CSP e cabeçalhos de segurança', () => {
+  const headersFor = (allowedOrigin: string): Record<string, string> => {
+    const headers: Record<string, string> = {};
+    applySecurityHeaders({ setHeader: (k: string, v: string) => void (headers[k] = v) } as never, {
+      allowedOrigin,
+    });
+    return headers;
+  };
+
+  it('a CSP bloqueia plugins (object-src) e não depende de inline', () => {
+    const csp = buildCsp('https://share.example.com');
+    expect(csp).toContain("object-src 'none'");
+    expect(csp).toContain("script-src 'self'");
+    expect(csp).not.toContain('unsafe-inline');
+    expect(csp).not.toContain('unsafe-eval');
+  });
+
+  it('upgrade-insecure-requests só em HTTPS', () => {
+    expect(buildCsp('https://share.example.com')).toContain('upgrade-insecure-requests');
+    expect(buildCsp('http://localhost:3000')).not.toContain('upgrade-insecure-requests');
+  });
+
+  it('envia os cabeçalhos de isolamento e anti-framing', () => {
+    const h = headersFor('https://share.example.com');
+    expect(h['Cross-Origin-Opener-Policy']).toBe('same-origin');
+    expect(h['Cross-Origin-Resource-Policy']).toBe('same-origin');
+    expect(h['X-Frame-Options']).toBe('DENY');
+    expect(h['X-Content-Type-Options']).toBe('nosniff');
+    expect(h['Referrer-Policy']).toBe('no-referrer');
+    expect(h['Permissions-Policy']).toBe('display-capture=(self)');
+  });
+
+  it('HSTS só em HTTPS, sem includeSubDomains nem preload', () => {
+    const https = headersFor('https://share.example.com');
+    expect(https['Strict-Transport-Security']).toBe('max-age=15552000');
+    expect(https['Strict-Transport-Security']).not.toMatch(/includeSubDomains|preload/);
+    expect(headersFor('http://localhost:3000')['Strict-Transport-Security']).toBeUndefined();
   });
 });

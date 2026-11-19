@@ -51,6 +51,9 @@ export function useScreenShare({ onStart, onStop }: UseScreenShareOptions): UseS
   const [error, setError] = useState<string | null>(null);
 
   const streamRef = useRef<MediaStream | null>(null);
+  // true enquanto o seletor do navegador está aberto: um segundo clique não abre outro.
+  const startingRef = useRef(false);
+  const mountedRef = useRef(true);
   const callbacks = useRef({ onStart, onStop });
   useEffect(() => {
     callbacks.current = { onStart, onStop };
@@ -72,7 +75,7 @@ export function useScreenShare({ onStart, onStop }: UseScreenShareOptions): UseS
 
   const start = useCallback(
     async ({ audio, contentHint }: StartOptions) => {
-      if (streamRef.current) return;
+      if (streamRef.current || startingRef.current) return;
       setError(null);
       if (!isCaptureSupported()) {
         setError('Este navegador não suporta compartilhamento de tela.');
@@ -80,6 +83,7 @@ export function useScreenShare({ onStart, onStop }: UseScreenShareOptions): UseS
       }
 
       let captured: MediaStream;
+      startingRef.current = true;
       try {
         captured = await navigator.mediaDevices.getDisplayMedia({
           video: { frameRate: { ideal: 30 } },
@@ -87,6 +91,15 @@ export function useScreenShare({ onStart, onStop }: UseScreenShareOptions): UseS
         });
       } catch (captureError) {
         setError(describeCaptureError(captureError));
+        return;
+      } finally {
+        startingRef.current = false;
+      }
+
+      // A sala foi fechada enquanto o seletor estava aberto: solta a captura que acabou de chegar
+      // (senão a tela continuaria sendo capturada sem ninguém para pará-la).
+      if (!mountedRef.current) {
+        captured.getTracks().forEach((track) => track.stop());
         return;
       }
 
@@ -111,7 +124,13 @@ export function useScreenShare({ onStart, onStop }: UseScreenShareOptions): UseS
   }, []);
 
   // Fechar a sala (ou a aba) com a captura ativa precisa liberar a tela.
-  useEffect(() => () => stop(), [stop]);
+  useEffect(() => {
+    mountedRef.current = true; // o StrictMode monta, desmonta e monta de novo em dev
+    return () => {
+      mountedRef.current = false;
+      stop();
+    };
+  }, [stop]);
 
   return {
     supported: isCaptureSupported(),
