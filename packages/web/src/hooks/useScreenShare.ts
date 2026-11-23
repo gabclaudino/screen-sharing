@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { displayMediaVideoConstraints } from '../lib/capture';
 
 export type ContentHint = 'detail' | 'motion';
 
@@ -86,7 +87,7 @@ export function useScreenShare({ onStart, onStop }: UseScreenShareOptions): UseS
       startingRef.current = true;
       try {
         captured = await navigator.mediaDevices.getDisplayMedia({
-          video: { frameRate: { ideal: 30 } },
+          video: displayMediaVideoConstraints(),
           audio,
         });
       } catch (captureError) {

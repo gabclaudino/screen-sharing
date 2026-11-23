@@ -29,6 +29,7 @@ export type CloseReason =
   | 'auth-expired' // sem token válido: voltar ao login
   | 'rejected' // servidor recusou o join (sala cheia, nome em uso, rate limit)
   | 'replaced' // outra conexão do mesmo login assumiu o lugar
+  | 'server-shutdown' // o servidor foi desligado de propósito: voltar ao login
   | 'policy'; // servidor fechou com 1008 (mensagem inválida / excesso de mensagens)
 
 export interface SignalingEvents {
@@ -45,6 +46,7 @@ export interface SignalingEvents {
   'peer-left': string;
   signal: { from: string; data: SignalData };
   'peer-sharing': { id: string; active: boolean };
+  'peer-avatar': { id: string; avatar: string | null };
   reaction: { from: string; emoji: ReactionEmoji };
   /** Erro enviado pelo servidor (ROOM_FULL, NAME_TAKEN, ...). */
   error: { code: ErrorCode; message: string };
@@ -61,6 +63,13 @@ export interface SignalingClientOptions {
   getSession: () => Session | null;
   /** true se ainda está compartilhando ao reentrar após uma queda (vai no `join`). */
   getSharing?: () => boolean;
+  /** Foto de perfil (id) a anunciar no `join`, inclusive ao reentrar após uma queda. */
+  getAvatar?: () => string | null;
+  /**
+   * Antes de cada reconexão: o login ainda vale? `false` (servidor religado) → `auth-expired`.
+   * Sem isto reconecta direto.
+   */
+  validateSession?: () => Promise<boolean>;
   webSocketFactory?: (url: string) => WebSocketLike;
   pingIntervalMs?: number;
   pongTimeoutMs?: number;
@@ -74,6 +83,7 @@ export interface SignalingClientOptions {
 const WS_OPEN = 1;
 const CLOSE_POLICY = 1008;
 const CLOSE_REPLACED = 4001;
+const CLOSE_SHUTDOWN = 4002;
 const REJECTING_ERRORS: ReadonlySet<ErrorCode> = new Set([
   'ROOM_FULL',
   'NAME_TAKEN',
@@ -83,6 +93,9 @@ const REJECTING_ERRORS: ReadonlySet<ErrorCode> = new Set([
 // Os navegadores tipam handlers com `Event`; o cast só estreita para o subconjunto acima.
 const defaultFactory = (url: string): WebSocketLike =>
   new WebSocket(url) as unknown as WebSocketLike;
+
+const avatarField = (avatar: string | null): { avatar?: string } =>
+  avatar === null ? {} : { avatar };
 
 /** `ws(s)://<host>/ws` para a origem da página (mesma origem do servidor). */
 export function buildWsUrl(location: Pick<Location, 'protocol' | 'host'>): string {
@@ -94,8 +107,16 @@ export function buildWsUrl(location: Pick<Location, 'protocol' | 'host'>): strin
  * e reconecta com backoff exponencial. Classe pura (sem React) para ser testável.
  */
 export class SignalingClient extends TypedEmitter<SignalingEvents> {
-  private readonly opts: Required<Omit<SignalingClientOptions, 'getSharing' | 'webSocketFactory'>> &
-    Pick<SignalingClientOptions, 'getSharing' | 'webSocketFactory'>;
+  private readonly opts: Required<
+    Omit<
+      SignalingClientOptions,
+      'getSharing' | 'getAvatar' | 'validateSession' | 'webSocketFactory'
+    >
+  > &
+    Pick<
+      SignalingClientOptions,
+      'getSharing' | 'getAvatar' | 'validateSession' | 'webSocketFactory'
+    >;
 
   private socket: WebSocketLike | null = null;
   private currentStatus: SignalingStatus = 'idle';
@@ -143,6 +164,11 @@ export class SignalingClient extends TypedEmitter<SignalingEvents> {
     return this.sendWhenConnected({ type: 'reaction', emoji });
   }
 
+  /** `null` remove a foto. Devolve `false` se não estiver conectado (o `join` já leva a foto atual). */
+  sendAvatar(avatar: string | null): boolean {
+    return this.sendWhenConnected({ type: 'avatar', avatar });
+  }
+
   sendSharing(active: boolean): boolean {
     return this.sendWhenConnected({ type: 'sharing', active });
   }
@@ -184,6 +210,7 @@ export class SignalingClient extends TypedEmitter<SignalingEvents> {
         type: 'join',
         name: this.opts.name,
         ...(this.opts.getSharing?.() ? { sharing: true } : {}),
+        ...avatarField(this.opts.getAvatar?.() ?? null),
       });
       this.startPing();
     };
@@ -229,6 +256,9 @@ export class SignalingClient extends TypedEmitter<SignalingEvents> {
       case 'peer-sharing':
         this.emit('peer-sharing', { id: message.id, active: message.active });
         return;
+      case 'peer-avatar':
+        this.emit('peer-avatar', { id: message.id, avatar: message.avatar });
+        return;
       case 'reaction':
         this.emit('reaction', { from: message.from, emoji: message.emoji });
         return;
@@ -249,6 +279,7 @@ export class SignalingClient extends TypedEmitter<SignalingEvents> {
 
     if (code === CLOSE_POLICY) return this.finish('policy');
     if (code === CLOSE_REPLACED) return this.finish('replaced');
+    if (code === CLOSE_SHUTDOWN) return this.finish('server-shutdown');
 
     this.setStatus('reconnecting');
     if (wasConnected) this.emit('disconnected', undefined);
@@ -258,8 +289,30 @@ export class SignalingClient extends TypedEmitter<SignalingEvents> {
     this.attempt += 1;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined;
-      this.openSocket('reconnecting');
+      void this.reconnect();
     }, delay);
+  }
+
+  /** Reabre o socket; antes, confere se o login sobreviveu (o servidor pode ter sido religado). */
+  private async reconnect(): Promise<void> {
+    const validate = this.opts.validateSession;
+    if (!validate) {
+      this.openSocket('reconnecting');
+      return;
+    }
+    let valid = true;
+    try {
+      valid = await validate();
+    } catch {
+      // Sem resposta: tenta reconectar do mesmo jeito.
+    }
+    // Enquanto esperava, a pessoa pode ter saído da sala (disconnect) ou o socket ter sido refeito.
+    if (this.currentStatus !== 'reconnecting' || this.reconnectTimer !== undefined) return;
+    if (!valid) {
+      this.finish('auth-expired');
+      return;
+    }
+    this.openSocket('reconnecting');
   }
 
   private startPing(): void {

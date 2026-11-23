@@ -1,5 +1,5 @@
 import type { ErrorCode, PeerInfo } from '@screenshare/shared';
-import type { PeerStatus } from './peer-link';
+import type { ConnectionInfo, PeerStatus } from './peer-link';
 import type { CloseReason, SignalingStatus } from './signaling-client';
 
 /** O que a UI sabe de cada participante remoto. */
@@ -7,7 +7,11 @@ export interface PeerView {
   id: string;
   name: string;
   sharing: boolean;
+  /** Id da foto de perfil; `null` = sem foto. */
+  avatar: string | null;
   status: PeerStatus;
+  /** Como a conexão passa (tipos de candidate, protocolo do relay); `null` até saber. */
+  connection: ConnectionInfo | null;
   stream: MediaStream | null;
 }
 
@@ -42,7 +46,9 @@ export type RoomAction =
   | { type: 'peer-joined'; peer: PeerInfo }
   | { type: 'peer-left'; id: string }
   | { type: 'peer-sharing'; id: string; active: boolean }
+  | { type: 'peer-avatar'; id: string; avatar: string | null }
   | { type: 'peer-status'; id: string; status: PeerStatus }
+  | { type: 'peer-connection'; id: string; info: ConnectionInfo }
   | { type: 'peer-stream'; id: string; stream: MediaStream | null }
   | { type: 'error'; code: ErrorCode }
   | { type: 'share-rejected' }
@@ -66,7 +72,9 @@ const toView = (peer: PeerInfo): PeerView => ({
   id: peer.id,
   name: peer.name,
   sharing: peer.sharing,
+  avatar: peer.avatar ?? null,
   status: 'connecting',
+  connection: null,
   stream: null,
 });
 
@@ -103,8 +111,12 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
     }
     case 'peer-sharing':
       return updatePeer(state, action.id, { sharing: action.active });
+    case 'peer-avatar':
+      return updatePeer(state, action.id, { avatar: action.avatar });
     case 'peer-status':
       return updatePeer(state, action.id, { status: action.status });
+    case 'peer-connection':
+      return updatePeer(state, action.id, { connection: action.info });
     case 'peer-stream':
       return updatePeer(state, action.id, { stream: action.stream });
     case 'error':
@@ -136,6 +148,44 @@ export const PEER_STATUS_LABEL: Record<PeerStatus, string> = {
   failed: 'falhou',
 };
 
+const KIND_LABEL: Record<string, string> = {
+  host: 'direto (rede local ou IPv6)',
+  srflx: 'direto via NAT (STUN)',
+  prflx: 'direto via NAT',
+  relay: 'relay (TURN)',
+  unknown: 'desconhecido',
+};
+
+/**
+ * Texto do selo de conexão. Relay por UDP continua "via relay (TURN)"; relay por TCP/TLS é
+ * destacado porque costuma deixar o vídeo bem pior (TCP trava e re-envia pacotes de vídeo).
+ */
+export function describeConnectionLabel(status: PeerStatus, info: ConnectionInfo | null): string {
+  if (status === 'relay' && (info?.relayProtocol === 'tcp' || info?.relayProtocol === 'tls')) {
+    return `via relay (TURN/${info.relayProtocol.toUpperCase()})`;
+  }
+  return PEER_STATUS_LABEL[status];
+}
+
+/** Explicação do caminho para o balão (`title`) do selo; `undefined` enquanto não se sabe. */
+export function describeConnectionDetail(info: ConnectionInfo | null): string | undefined {
+  if (!info) return undefined;
+  const parts = [
+    `Seu lado: ${KIND_LABEL[info.local] ?? info.local}${info.ipv6 ? ', IPv6' : ''}`,
+    `Do outro lado: ${KIND_LABEL[info.remote] ?? info.remote}`,
+  ];
+  if (info.relayProtocol) {
+    parts.push(
+      info.relayProtocol === 'udp'
+        ? 'Relay por UDP (o ideal para vídeo)'
+        : `Relay por ${info.relayProtocol.toUpperCase()}: pior para vídeo (a rede bloqueia UDP)`,
+    );
+  } else if (info.type === 'relay') {
+    parts.push('O relay está do lado do outro participante');
+  }
+  return parts.join(' · ');
+}
+
 export function describeServerError(code: ErrorCode): string {
   switch (code) {
     case 'ROOM_FULL':
@@ -158,7 +208,9 @@ export function describeClose(reason: CloseReason, lastError: ErrorCode | null):
     case 'disconnect':
       return null;
     case 'auth-expired':
-      return 'Sua sessão expirou. Entre novamente.';
+      return 'Sua sessão expirou ou o servidor foi reiniciado. Entre novamente com a senha.';
+    case 'server-shutdown':
+      return 'O servidor foi desligado. Entre novamente quando ele voltar.';
     case 'rejected':
       return lastError ? describeServerError(lastError) : 'Não foi possível entrar na sala.';
     case 'replaced':

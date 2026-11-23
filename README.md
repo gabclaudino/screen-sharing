@@ -4,6 +4,7 @@ Compartilhamento de tela entre amigos, direto de navegador para navegador (WebRT
 sala** protegida por uma senha. Custo ~zero e hospedado no seu próprio PC.
 
 - **Uma pessoa compartilha por vez**; até 6 pessoas na sala.
+- **Foto de perfil:** cada pessoa escolhe uma foto (clicando no próprio ícone na lista de participantes) e todos a veem; sem escolha, aparece a silhueta padrão. As opções ficam em `packages/web/src/lib/profile-photos.ts` e os arquivos em `packages/web/public/fotos/` (fora do git).
 - **Reações:** botões de emoji (😂 🔥 💀 👏 ❤️ 😮) que sobem pela tela de todo mundo.
 - O servidor só repassa a sinalização: **o vídeo nunca passa por ele**.
 - Conexão direta (P2P) quando possível; **relay TURN** (Cloudflare) para quem está em 4G/5G, empresa
@@ -93,7 +94,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 | `MAX_PEERS_PER_ROOM`        | `6`                 | Máximo de pessoas na sala.                                                                                                                                                                                                 |
 | `LOGIN_RATE_MAX`            | `10`                | Tentativas de login por IP em cada janela.                                                                                                                                                                                 |
 | `LOGIN_RATE_WINDOW_MIN`     | `10`                | Duração da janela, em minutos.                                                                                                                                                                                             |
-| `WS_MSG_RATE_PER_SEC`       | `50`                | Mensagens por segundo permitidas por conexão.                                                                                                                                                                              |
+| `WS_MSG_RATE_PER_SEC`       | `400`               | Mensagens por segundo permitidas por conexão. Não baixe muito: ao entrar, a sinalização WebRTC manda uma rajada de dezenas de mensagens por pessoa na sala.                                                                |
 | `STATIC_DIR`                | `packages/web/dist` | Onde está o front compilado (relativo à raiz do projeto).                                                                                                                                                                  |
 | `ICE_PROVIDER`              | `none`              | `cloudflare`, `metered` ou `none` (só STUN: não funciona para quem está em 4G ou rede restrita).                                                                                                                           |
 | `ICE_CREDENTIAL_TTL_SEC`    | `86400`             | Validade das credenciais TURN. **Precisa ser maior que a sessão mais longa** (o Cloudflare aceita até 48 h).                                                                                                               |
@@ -249,7 +250,7 @@ Na pasta do projeto há três atalhos de **duplo clique**:
 | Arquivo        | O que faz                                                                             |
 | -------------- | ------------------------------------------------------------------------------------- |
 | `LIGAR.bat`    | Liga o servidor e abre o navegador no endereço do app.                                |
-| `DESLIGAR.bat` | Desliga o servidor. Quem estava na sala é desconectado.                               |
+| `DESLIGAR.bat` | Desliga o servidor. Todos são desconectados e precisam entrar de novo com a senha.    |
 | `STATUS.bat`   | Mostra se o servidor está ligado, o endereço e se o túnel do Cloudflare está rodando. |
 
 O que o `LIGAR.bat` faz por você:
@@ -266,6 +267,12 @@ Dicas:
 
 - **Atalho na área de trabalho:** clique com o botão direito em `LIGAR.bat` → _Mostrar mais opções_ →
   _Enviar para_ → _Área de trabalho (criar atalho)_. Faça o mesmo com o `DESLIGAR.bat`.
+- **Desligar encerra tudo.** O `DESLIGAR.bat` pede ao servidor que feche com educação: ele avisa cada
+  navegador conectado, que volta para a tela de entrada (com "O servidor foi desligado"), e só então
+  sai. Se ele não responder em 6 segundos, é encerrado à força. **Quem estava com a aba aberta não
+  volta sozinho:** cada vez que o servidor sobe, os logins anteriores deixam de valer (o
+  servidor assina os logins com uma chave nova a cada execução), então todos digitam a senha de novo,
+  mesmo que o servidor tenha caído sem aviso e voltado depois.
 - **O túnel continua ligado**, como serviço do Windows (seção 5.2b), e gasta quase nada. Com o app
   desligado, quem abrir o endereço vê uma página de erro **502** do Cloudflare: é o esperado. Se quiser
   desligar o túnel também (PowerShell como administrador): `Stop-Service cloudflared`, e
@@ -389,6 +396,31 @@ Faça depois de publicar. Os itens com 📱 precisam de um segundo dispositivo.
 | Compartilhar a tela deixa um "espelho infinito"                                    | Você está compartilhando a tela inteira com a prévia ("Ver minha tela") ligada. Desligue a prévia ou compartilhe uma janela/aba.                                                                                                                                                                                                                                                                                 |
 | Quem assiste ouve a própria voz                                                    | O áudio do sistema inclui a call. Veja a seção 8.                                                                                                                                                                                                                                                                                                                                                                |
 | Sem som ao assistir                                                                | O navegador pode ter bloqueado o autoplay com som: clique em "Ativar som" no vídeo. Confira também o volume/silenciar (clique direito na transmissão).                                                                                                                                                                                                                                                           |
+
+### Vídeo borrado ou com blocos, ou "via relay" em vez de "direto (P2P)"
+
+O app **limita a captura a 1080p** (telas de 1440p, 4K ou ultrawide são reduzidas antes do envio):
+com o mesmo bitrate, menos pixels dão uma imagem bem mais nítida. Se ainda estiver ruim, passe o
+mouse sobre o selo de conexão (na barra do vídeo ou na lista de participantes): o balão mostra **por
+onde** a conexão passa (nosso lado e o do outro, IPv6, e o protocolo do relay).
+
+- **"via relay (TURN)"**: o caminho direto não funcionou e o vídeo passa pelo servidor de relay. Por
+  UDP funciona bem; **"via relay (TURN/TCP)" ou "/TLS"** é o pior caso (a rede bloqueia UDP e o TCP
+  trava e reenvia pacotes de vídeo), e a imagem fica bem pior.
+- **Por que não fica direto:** o P2P precisa que pelo menos um lado consiga receber pacotes UDP de
+  fora. Impedem isso: operadora com **CGNAT** (IPv4 compartilhado) sem IPv6 nos dois lados, NAT
+  "simétrico" do roteador, **VPN**, **extensão de privacidade** do navegador que bloqueia WebRTC
+  (por exemplo "WebRTC leak prevent" ou a opção de ocultar IP do uBlock Origin), firewall ou
+  antivírus (como o AVG) bloqueando UDP do navegador, e roteador com "isolamento de clientes" (Wi-Fi).
+  Ter a mesma operadora não garante P2P: o que conta é o tipo de NAT de cada casa.
+- **Teste rápido:** peça para os dois entrarem **sem extensões** (janela anônima, que normalmente não
+  carrega extensões), sem VPN, e se possível por cabo. Se ficar "direto (P2P)", era uma extensão ou
+  VPN. Se continuar relay, é a rede (CGNAT/NAT): ligar o **IPv6** no roteador dos dois costuma
+  resolver, porque IPv6 não tem NAT.
+- **Se o vídeo ainda estiver ruim, em P2P ou relay:** use o tipo **"Texto / código (nitidez)"** (o
+  tipo "Movimento" derruba a resolução quando falta banda) e confira o upload de quem compartilha.
+  Em `chrome://webrtc-internals`, no PC de quem compartilha, o bloco `outbound-rtp` mostra
+  `qualityLimitationReason` (`cpu` ou `bandwidth`), a resolução real e o bitrate alcançado.
 
 ## 11. Segurança
 

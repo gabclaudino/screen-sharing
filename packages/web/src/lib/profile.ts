@@ -1,4 +1,4 @@
-import { isValidName } from '@screenshare/shared';
+import { avatarIdSchema, isValidName } from '@screenshare/shared';
 
 // A regra do nome é a mesma do servidor (fica em @screenshare/shared).
 export { isValidName };
@@ -86,6 +86,27 @@ export function markAudioGuideSeen(storage = defaultStorage()): void {
     storage?.setItem(GUIDE_SEEN_KEY, '1');
   } catch {
     // sem storage: o guia pode abrir sozinho de novo, sem prejuízo
+  }
+}
+
+const AVATAR_KEY = 'screenshare.avatar';
+
+/** Foto de perfil escolhida (só o id), lembrada entre visitas; `null` = sem foto. */
+export function loadAvatar(storage = defaultStorage()): string | null {
+  try {
+    const value = storage?.getItem(AVATAR_KEY);
+    return avatarIdSchema.safeParse(value).success ? (value as string) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveAvatar(avatar: string | null, storage = defaultStorage()): void {
+  try {
+    if (avatar === null) storage?.setItem(AVATAR_KEY, '');
+    else storage?.setItem(AVATAR_KEY, avatar);
+  } catch {
+    // sem storage: a foto só não é lembrada na próxima visita
   }
 }
 

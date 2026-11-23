@@ -15,4 +15,7 @@ export const BACKGROUND_PHOTOS: readonly BackgroundPhoto[] = [
   { src: '/fotos/guri-4.jpg', className: 'bg-photo-4' },
   { src: '/fotos/guri-5.jpg', className: 'bg-photo-5' },
   { src: '/fotos/guri-6.jpg', className: 'bg-photo-6' },
+  { src: '/fotos/guri-7.jpg', className: 'bg-photo-7' },
+  { src: '/fotos/guri-8.jpg', className: 'bg-photo-8' },
+  { src: '/fotos/guri-9.jpg', className: 'bg-photo-9' },
 ];

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
+import { resumeAfterFullscreen } from '../lib/fullscreen-resume';
 import { clampMenuPosition } from '../lib/menu-position';
-import type { PeerStatus } from '../lib/peer-link';
+import type { ConnectionInfo, PeerStatus } from '../lib/peer-link';
 import { loadPlayback, savePlayback, type Playback } from '../lib/profile';
-import { PEER_STATUS_LABEL } from '../lib/room-state';
+import { describeConnectionDetail, describeConnectionLabel } from '../lib/room-state';
 import { EnterFullscreenIcon, ExitFullscreenIcon } from './icons';
 import { TILE_MENU_SIZE, TileAudioMenu } from './TileAudioMenu';
 
@@ -12,9 +13,19 @@ interface Props {
   /** Prévia local: sempre muda (senão haveria eco do próprio áudio) e sem menu de áudio. */
   local?: boolean;
   status?: PeerStatus;
+  connection?: ConnectionInfo | null;
+  /** Texto do tile sem vídeo; o padrão é "Conectando à tela de {label}…". */
+  placeholder?: string;
 }
 
-export function VideoTile({ stream, label, local = false, status }: Props) {
+export function VideoTile({
+  stream,
+  label,
+  local = false,
+  status,
+  connection = null,
+  placeholder,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [soundBlocked, setSoundBlocked] = useState(false);
@@ -52,6 +63,16 @@ export function VideoTile({ stream, label, local = false, status }: Props) {
     };
   }, [stream, local]);
 
+  // iPhone/iPad: o iOS pausa o vídeo ao sair da tela cheia nativa; numa transmissão ao vivo isso
+  // congelaria a imagem, então retoma sozinho (ver fullscreen-resume).
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    return resumeAfterFullscreen(video, undefined, (error) =>
+      console.warn('[video] não consegui retomar depois da tela cheia:', error),
+    );
+  }, []);
+
   // Lembra volume/mudo entre transmissões e visitas.
   useEffect(() => {
     if (!local) savePlayback(playback);
@@ -79,9 +100,17 @@ export function VideoTile({ stream, label, local = false, status }: Props) {
     if (document.fullscreenElement) {
       void document.exitFullscreen();
     } else {
-      containerRef.current?.requestFullscreen().catch((error: unknown) => {
-        console.warn('[video] tela cheia indisponível:', error);
-      });
+      const container = containerRef.current;
+      if (container && typeof container.requestFullscreen === 'function') {
+        container.requestFullscreen().catch((error: unknown) => {
+          console.warn('[video] tela cheia indisponível:', error);
+        });
+      } else {
+        // iPhone/iPad (Safari e Chrome): só o próprio <video> vai para a tela cheia.
+        (
+          videoRef.current as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null
+        )?.webkitEnterFullscreen?.();
+      }
     }
   }
 
@@ -108,15 +137,19 @@ export function VideoTile({ stream, label, local = false, status }: Props) {
     >
       <video ref={videoRef} autoPlay playsInline muted={local} />
       {stream === null ? (
-        <div className="tile-placeholder">Conectando à tela de {label}…</div>
+        <div className="tile-placeholder">{placeholder ?? `Conectando à tela de ${label}…`}</div>
       ) : null}
       <div className="tile-bar">
-        <span className="tile-label">
-          {label}
-          {local ? ' (prévia)' : ''}
-        </span>
+        {label !== '' ? (
+          <span className="tile-label">
+            {label}
+            {local ? ' (prévia)' : ''}
+          </span>
+        ) : null}
         {status ? (
-          <span className={`badge badge-${status}`}>{PEER_STATUS_LABEL[status]}</span>
+          <span className={`badge badge-${status}`} title={describeConnectionDetail(connection)}>
+            {describeConnectionLabel(status, connection)}
+          </span>
         ) : null}
         <span className="tile-actions">
           {soundBlocked ? (

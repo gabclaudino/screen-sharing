@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   hasSeenAudioGuide,
+  loadAvatar,
   isValidName,
   loadPlayback,
   loadProfile,
   markAudioGuideSeen,
+  saveAvatar,
   savePlayback,
   saveProfile,
 } from './profile';
@@ -85,6 +87,37 @@ describe('guia de áudio visto', () => {
     expect(hasSeenAudioGuide(throwing)).toBe(false);
     expect(() => markAudioGuideSeen(throwing)).not.toThrow();
     expect(hasSeenAudioGuide()).toBe(false); // sem localStorage global (Node)
+  });
+});
+
+describe('foto de perfil lembrada', () => {
+  it('começa sem foto; salva, recarrega e remove', () => {
+    const storage = fakeStorage();
+    expect(loadAvatar(storage)).toBeNull();
+    saveAvatar('guri-3', storage);
+    expect(loadAvatar(storage)).toBe('guri-3');
+    saveAvatar(null, storage);
+    expect(loadAvatar(storage)).toBeNull();
+  });
+
+  it('ignora valor guardado que não é um id válido', () => {
+    const storage = fakeStorage();
+    storage.setItem('screenshare.avatar', '<img src=x>');
+    expect(loadAvatar(storage)).toBeNull();
+  });
+
+  it('tolera storage ausente ou que lança', () => {
+    const throwing = {
+      getItem: () => {
+        throw new Error('bloqueado');
+      },
+      setItem: () => {
+        throw new Error('bloqueado');
+      },
+    };
+    expect(loadAvatar(throwing)).toBeNull();
+    expect(() => saveAvatar('guri-1', throwing)).not.toThrow();
+    expect(loadAvatar()).toBeNull();
   });
 });
 

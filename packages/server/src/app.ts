@@ -30,6 +30,8 @@ export interface AppOptions {
   maxConnectionsPerSession?: number;
   maxConnections?: number;
   joinTimeoutMs?: number;
+  /** Identifica esta execução do servidor (padrão: aleatório); só os testes fixam. */
+  bootId?: string;
 }
 
 const MAX_LOGIN_BODY_BYTES = 1024;
@@ -74,6 +76,9 @@ function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
  */
 export function createApp(config: Config, options: AppOptions = {}) {
   const logger = options.logger ?? silentLogger;
+  // Cada subida do servidor assina os logins com uma chave nova: quem entrou antes de um
+  // desligamento/reinício precisa digitar a senha de novo (o token antigo deixa de valer).
+  const signingSecret = `${config.sessionSecret}:${options.bootId ?? randomUUID()}`;
   const signaling = createSignaling({
     config,
     logger,
@@ -143,11 +148,7 @@ export function createApp(config: Config, options: AppOptions = {}) {
       return;
     }
 
-    const { token, expiresAt } = createToken(
-      config.sessionSecret,
-      randomUUID(),
-      config.sessionTtlSec,
-    );
+    const { token, expiresAt } = createToken(signingSecret, randomUUID(), config.sessionTtlSec);
     logger.info('login');
     const response: LoginResponse = { token, expiresAt };
     sendJson(res, 200, response);
@@ -157,12 +158,24 @@ export function createApp(config: Config, options: AppOptions = {}) {
   async function handleIce(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const header = req.headers.authorization;
     const token = header?.startsWith('Bearer ') ? header.slice(7).trim() : '';
-    if (!token || !verifyToken(token, config.sessionSecret)) {
+    if (!token || !verifyToken(token, signingSecret)) {
       sendJson(res, 401, { error: 'UNAUTHORIZED' });
       return;
     }
     // Nunca 5xx por falha do provedor: o IceService já cai para só STUN.
     sendJson(res, 200, { iceServers: await iceService.getIceServers() });
+  }
+
+  // O cliente pergunta, antes de reconectar depois de uma queda, se o login ainda vale (200) ou
+  // se o servidor foi desligado e religado nesse meio-tempo (401: voltar à tela de entrada).
+  function handleSession(req: IncomingMessage, res: ServerResponse): void {
+    const header = req.headers.authorization;
+    const token = header?.startsWith('Bearer ') ? header.slice(7).trim() : '';
+    if (!token || !verifyToken(token, signingSecret)) {
+      sendJson(res, 401, { error: 'UNAUTHORIZED' });
+      return;
+    }
+    sendJson(res, 200, { ok: true });
   }
 
   async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -185,6 +198,15 @@ export function createApp(config: Config, options: AppOptions = {}) {
         return;
       }
       await handleIce(req, res);
+      return;
+    }
+    if (pathname === '/api/session') {
+      if (req.method !== 'GET') {
+        res.setHeader('Allow', 'GET');
+        sendJson(res, 405, { error: 'METHOD_NOT_ALLOWED' });
+        return;
+      }
+      handleSession(req, res);
       return;
     }
     // Rotas /api/* desconhecidas nunca caem no fallback SPA.
@@ -245,7 +267,7 @@ export function createApp(config: Config, options: AppOptions = {}) {
       return;
     }
     const token = url.searchParams.get('token');
-    const session = token ? verifyToken(token, config.sessionSecret) : null;
+    const session = token ? verifyToken(token, signingSecret) : null;
     if (!session) {
       rejectUpgrade(socket, 401, 'Unauthorized');
       return;

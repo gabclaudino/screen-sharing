@@ -39,3 +39,11 @@ export const LogOutIcon = () => (
     <path d="M21 12H9" />
   </svg>
 );
+
+/** Silhueta de "sem foto": cabeça e ombros, preenchida (ocupa o círculo do avatar). */
+export const NoPhotoIcon = () => (
+  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+    <circle cx="12" cy="9" r="4.2" />
+    <path d="M3.5 22c0-4.7 3.8-7.6 8.5-7.6s8.5 2.9 8.5 7.6z" />
+  </svg>
+);

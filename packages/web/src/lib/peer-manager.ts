@@ -1,13 +1,15 @@
 import type { PeerInfo, SignalData } from '@screenshare/shared';
 import { TypedEmitter } from './emitter';
-import { PeerLink, type PeerStatus } from './peer-link';
+import { PeerLink, type ConnectionInfo, type PeerStatus } from './peer-link';
 
-export type { PeerStatus } from './peer-link';
+export type { ConnectionInfo, PeerStatus } from './peer-link';
 
 export interface PeerManagerEvents {
   /** Stream recebido de um peer; `null` quando ele parou de enviar. */
   'remote-stream': { peerId: string; stream: MediaStream | null };
   status: { peerId: string; status: PeerStatus };
+  /** Detalhes do caminho da conexão (P2P/relay, tipos de candidate, protocolo do relay). */
+  connection: { peerId: string; info: ConnectionInfo };
 }
 
 export interface PeerManagerOptions {
@@ -124,6 +126,9 @@ export class PeerManager extends TypedEmitter<PeerManagerEvents> {
       },
       onStatus: (status) => {
         if (this.links.get(peerId) === link) this.emit('status', { peerId, status });
+      },
+      onConnection: (info) => {
+        if (this.links.get(peerId) === link) this.emit('connection', { peerId, info });
       },
       onRemoteStream: (stream) => {
         if (this.links.get(peerId) === link) this.emit('remote-stream', { peerId, stream });

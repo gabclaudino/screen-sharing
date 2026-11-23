@@ -3,12 +3,15 @@ import {
   allPeers,
   createInitialRoomState,
   describeClose,
+  describeConnectionDetail,
+  describeConnectionLabel,
   describeServerError,
   roomReducer,
   sharingPeers,
   type RoomAction,
   type RoomState,
 } from './room-state';
+import type { ConnectionInfo } from './peer-link';
 
 const ID_A = '3f2b8c1e-5a47-4d6b-9c1a-0e7d2f4b6a10';
 const ID_B = '9a1d7e52-83c4-4f0b-b6a2-1c5e8d3f7a21';
@@ -51,9 +54,23 @@ describe('roomReducer', () => {
       id: ID_B,
       name: 'Bia',
       sharing: true,
+      avatar: null,
       status: 'connecting',
+      connection: null,
       stream: null,
     });
+  });
+
+  it('a foto de perfil vem no peer e peer-avatar a troca ou remove; peer que saiu é ignorado', () => {
+    const joined = run([
+      { type: 'peer-joined', peer: { id: ID_B, name: 'Bia', sharing: false, avatar: 'guri-3' } },
+    ]);
+    expect(joined.peers[ID_B]?.avatar).toBe('guri-3');
+    const changed = roomReducer(joined, { type: 'peer-avatar', id: ID_B, avatar: 'guri-5' });
+    expect(changed.peers[ID_B]?.avatar).toBe('guri-5');
+    const removed = roomReducer(changed, { type: 'peer-avatar', id: ID_B, avatar: null });
+    expect(removed.peers[ID_B]?.avatar).toBeNull();
+    expect(roomReducer(removed, { type: 'peer-avatar', id: ID_A, avatar: 'x' })).toBe(removed);
   });
 
   it('joined sem selfName (servidor antigo) deixa selfName nulo, e a UI usa o nome digitado', () => {
@@ -199,6 +216,59 @@ describe('mensagens', () => {
     expect(describeClose('rejected', 'ROOM_FULL')).toMatch(/cheia/i);
     expect(describeClose('rejected', null)).toMatch(/não foi possível/i);
     expect(describeClose('replaced', null)).toMatch(/outro lugar/i);
+    expect(describeClose('server-shutdown', null)).toMatch(/servidor foi desligado/i);
+    expect(describeClose('auth-expired', null)).toMatch(/servidor foi reiniciado/i);
     expect(describeClose('policy', null)).toBeTruthy();
+  });
+});
+
+describe('conexão: textos do selo e detalhes', () => {
+  const info = (extra: Partial<ConnectionInfo> = {}): ConnectionInfo => ({
+    type: 'relay',
+    local: 'relay',
+    remote: 'srflx',
+    relayProtocol: 'udp',
+    ipv6: false,
+    ...extra,
+  });
+
+  it('peer-connection guarda os detalhes no peer; peer que saiu é ignorado', () => {
+    const state = run([{ type: 'peer-joined', peer: { id: ID_B, name: 'Bia', sharing: false } }]);
+    const next = roomReducer(state, { type: 'peer-connection', id: ID_B, info: info() });
+    expect(next.peers[ID_B]?.connection).toEqual(info());
+    expect(roomReducer(next, { type: 'peer-connection', id: ID_A, info: info() })).toBe(next);
+  });
+
+  it('relay por UDP e conexão direta mantêm os textos de sempre', () => {
+    expect(describeConnectionLabel('relay', info())).toBe('via relay (TURN)');
+    expect(describeConnectionLabel('relay', null)).toBe('via relay (TURN)');
+    expect(describeConnectionLabel('p2p', info({ type: 'p2p', relayProtocol: null }))).toBe(
+      'direto (P2P)',
+    );
+  });
+
+  it('relay por TCP ou TLS é destacado, porque piora o vídeo', () => {
+    expect(describeConnectionLabel('relay', info({ relayProtocol: 'tcp' }))).toBe(
+      'via relay (TURN/TCP)',
+    );
+    expect(describeConnectionLabel('relay', info({ relayProtocol: 'tls' }))).toBe(
+      'via relay (TURN/TLS)',
+    );
+  });
+
+  it('o balão explica o caminho; sem informação ainda, não há balão', () => {
+    expect(describeConnectionDetail(null)).toBeUndefined();
+    const text = describeConnectionDetail(info({ relayProtocol: 'tcp' }));
+    expect(text).toContain('relay (TURN)');
+    expect(text).toContain('direto via NAT (STUN)');
+    expect(text).toContain('Relay por TCP');
+    expect(describeConnectionDetail(info({ relayProtocol: 'udp' }))).toContain(
+      'o ideal para vídeo',
+    );
+    expect(
+      describeConnectionDetail(
+        info({ type: 'p2p', local: 'host', remote: 'host', relayProtocol: null, ipv6: true }),
+      ),
+    ).toContain('IPv6');
   });
 });

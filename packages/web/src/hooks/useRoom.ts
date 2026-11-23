@@ -1,6 +1,6 @@
 import type { ReactionEmoji } from '@screenshare/shared';
 import { useCallback, useEffect, useReducer, useRef } from 'react';
-import type { Session } from '../lib/auth';
+import { isSessionValid, type Session } from '../lib/auth';
 import { IceServerStore } from '../lib/ice';
 import { PeerManager } from '../lib/peer-manager';
 import { createInitialRoomState, roomReducer, type RoomState } from '../lib/room-state';
@@ -9,6 +9,8 @@ import { buildWsUrl, SignalingClient } from '../lib/signaling-client';
 export interface UseRoomParams {
   name: string;
   session: Session;
+  /** Foto de perfil (id) desta pessoa; `null` = sem foto. Mudanças vão para a sala na hora. */
+  avatar?: string | null;
   /** Reação de outra pessoa chegou (a UI mostra o emoji subindo na tela). */
   onReaction?: (from: string, emoji: ReactionEmoji) => void;
 }
@@ -25,7 +27,12 @@ export interface UseRoomResult {
 const DEFAULT_BITRATE = 2_500_000;
 
 /** Liga SignalingClient + PeerManager ao estado da UI e cuida do ciclo de vida de ambos. */
-export function useRoom({ name, session, onReaction }: UseRoomParams): UseRoomResult {
+export function useRoom({
+  name,
+  session,
+  avatar = null,
+  onReaction,
+}: UseRoomParams): UseRoomResult {
   const [state, dispatch] = useReducer(roomReducer, undefined, createInitialRoomState);
 
   const clientRef = useRef<SignalingClient | null>(null);
@@ -36,11 +43,19 @@ export function useRoom({ name, session, onReaction }: UseRoomParams): UseRoomRe
   const bitrateRef = useRef(DEFAULT_BITRATE);
 
   const onReactionRef = useRef(onReaction);
+  const avatarRef = useRef(avatar);
 
   useEffect(() => {
     sessionRef.current = session;
     onReactionRef.current = onReaction;
   }, [session, onReaction]);
+
+  // O `join` leva a foto atual; depois disso, cada troca é anunciada à sala (sem efeito se ainda
+  // não conectou: o próximo `join` já a inclui).
+  useEffect(() => {
+    avatarRef.current = avatar;
+    clientRef.current?.sendAvatar(avatar);
+  }, [avatar]);
 
   useEffect(() => {
     const client = new SignalingClient({
@@ -49,6 +64,12 @@ export function useRoom({ name, session, onReaction }: UseRoomParams): UseRoomRe
       getSession: () => sessionRef.current,
       // Reentrando após queda do WS enquanto ainda compartilha: o servidor precisa saber.
       getSharing: () => sharingRef.current,
+      getAvatar: () => avatarRef.current,
+      // Servidor desligado e religado enquanto a aba ficou aberta: o login antigo não vale mais.
+      validateSession: () => {
+        const current = sessionRef.current;
+        return current ? isSessionValid(current.token) : Promise.resolve(false);
+      },
     });
     const ice = new IceServerStore({
       getSession: () => sessionRef.current,
@@ -79,6 +100,9 @@ export function useRoom({ name, session, onReaction }: UseRoomParams): UseRoomRe
         dispatch({ type: 'peer-left', id });
       }),
       client.on('peer-sharing', ({ id, active }) => dispatch({ type: 'peer-sharing', id, active })),
+      client.on('peer-avatar', ({ id, avatar: peerAvatar }) =>
+        dispatch({ type: 'peer-avatar', id, avatar: peerAvatar }),
+      ),
       client.on('reaction', ({ from, emoji }) => onReactionRef.current?.(from, emoji)),
       client.on('signal', ({ from, data }) => manager.handleSignal(from, data)),
       client.on('error', ({ code }) =>
@@ -88,6 +112,9 @@ export function useRoom({ name, session, onReaction }: UseRoomParams): UseRoomRe
       client.on('closed', ({ reason }) => dispatch({ type: 'closed', reason })),
       manager.on('remote-stream', ({ peerId, stream }) =>
         dispatch({ type: 'peer-stream', id: peerId, stream }),
+      ),
+      manager.on('connection', ({ peerId, info }) =>
+        dispatch({ type: 'peer-connection', id: peerId, info }),
       ),
       manager.on('status', ({ peerId, status }) =>
         dispatch({ type: 'peer-status', id: peerId, status }),

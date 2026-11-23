@@ -77,7 +77,9 @@ const envSchema = z
     MAX_PEERS_PER_ROOM: positiveInt(6, 2, 12),
     LOGIN_RATE_MAX: positiveInt(10),
     LOGIN_RATE_WINDOW_MIN: positiveInt(10, 1, 24 * 60),
-    WS_MSG_RATE_PER_SEC: positiveInt(50),
+    // Ao entrar, cada conexão WebRTC manda dezenas de candidates ICE de uma vez (um por adaptador,
+    // IPv6, STUN e porta de relay): com vários peers passa de 200 mensagens no primeiro segundo.
+    WS_MSG_RATE_PER_SEC: positiveInt(400),
     STATIC_DIR: z.string().min(1).default('packages/web/dist'),
     ICE_PROVIDER: z.enum(['cloudflare', 'metered', 'none']).default('none'),
     ICE_CREDENTIAL_TTL_SEC: positiveInt(86400, 60, 172800),

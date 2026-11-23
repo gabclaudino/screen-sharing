@@ -6,6 +6,8 @@
 export interface FakeTrack {
   id: string;
   kind: 'audio' | 'video';
+  /** Resolução da captura (só nas tracks de vídeo dos testes de limite de resolução). */
+  getSettings?: () => { width?: number; height?: number };
 }
 
 type Listener = () => void;
@@ -44,14 +46,16 @@ export class FakeStream {
 export class FakeSender {
   track: FakeTrack | null = null;
   streamId: string | null = null;
-  params: { encodings: { maxBitrate?: number }[] } = { encodings: [] };
+  params: { encodings: { maxBitrate?: number; scaleResolutionDownBy?: number }[] } = {
+    encodings: [],
+  };
   setParametersCalls: (number | undefined)[] = [];
 
   getParameters() {
     return this.params;
   }
 
-  setParameters(params: { encodings: { maxBitrate?: number }[] }): Promise<void> {
+  setParameters(params: FakeSender['params']): Promise<void> {
     this.params = params;
     this.setParametersCalls.push(params.encodings[0]?.maxBitrate);
     return Promise.resolve();
@@ -212,11 +216,15 @@ export class FakePeerConnection {
   }
 
   /** Reports para getStats(): um par selecionado com candidates locais/remotos dos tipos dados. */
-  setSelectedPair(local: 'host' | 'srflx' | 'relay', remote: 'host' | 'srflx' | 'relay'): void {
+  setSelectedPair(
+    local: 'host' | 'srflx' | 'relay',
+    remote: 'host' | 'srflx' | 'relay',
+    extra: { relayProtocol?: string; address?: string } = {},
+  ): void {
     this.statsReports = [
       { id: 'T', type: 'transport', selectedCandidatePairId: 'P' },
       { id: 'P', type: 'candidate-pair', localCandidateId: 'L', remoteCandidateId: 'R' },
-      { id: 'L', type: 'local-candidate', candidateType: local },
+      { id: 'L', type: 'local-candidate', candidateType: local, ...extra },
       { id: 'R', type: 'remote-candidate', candidateType: remote },
     ];
   }

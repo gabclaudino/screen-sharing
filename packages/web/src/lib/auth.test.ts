@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { login, LoginError } from './auth';
+import { isSessionValid, login, LoginError } from './auth';
 
 const respond = (status: number, body?: unknown): typeof fetch =>
   (() =>
@@ -43,5 +43,30 @@ describe('login', () => {
 
   it('resposta 200 malformada vira SERVER', async () => {
     await expect(login('x', respond(200, { foo: 1 }))).rejects.toMatchObject({ code: 'SERVER' });
+  });
+});
+
+describe('isSessionValid', () => {
+  it('manda o token por Bearer em GET /api/session', async () => {
+    let captured: { url: string; init: RequestInit | undefined } | undefined;
+    const fetchImpl = ((url: string, init?: RequestInit) => {
+      captured = { url, init };
+      return Promise.resolve(new Response('{"ok":true}', { status: 200 }));
+    }) as typeof fetch;
+    await expect(isSessionValid('tok', fetchImpl)).resolves.toBe(true);
+    expect(captured?.url).toBe('/api/session');
+    expect(captured?.init?.headers).toEqual({ Authorization: 'Bearer tok' });
+  });
+
+  it('só o 401 (servidor religado ou token expirado) conta como inválido', async () => {
+    await expect(isSessionValid('tok', respond(401))).resolves.toBe(false);
+    for (const status of [200, 500, 502, 503]) {
+      await expect(isSessionValid('tok', respond(status))).resolves.toBe(true);
+    }
+  });
+
+  it('rede fora do ar conta como "ainda vale" (a reconexão segue tentando)', async () => {
+    const failing = (() => Promise.reject(new TypeError('fetch failed'))) as typeof fetch;
+    await expect(isSessionValid('tok', failing)).resolves.toBe(true);
   });
 });

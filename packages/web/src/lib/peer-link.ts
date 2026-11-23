@@ -1,4 +1,5 @@
 import type { SignalData } from '@screenshare/shared';
+import { downscaleFactor } from './capture';
 
 /** Estado de conexão com um peer, como mostrado na UI. */
 export type PeerStatus = 'connecting' | 'p2p' | 'relay' | 'failed';
@@ -12,6 +13,8 @@ export interface PeerLinkDeps {
   pc: RTCPeerConnection;
   sendSignal: (data: SignalData) => void;
   onStatus: (status: PeerStatus) => void;
+  /** Detalhes do caminho (tipos de candidate, protocolo do relay); só quando mudam. */
+  onConnection?: (info: ConnectionInfo) => void;
   /** `null` quando o peer parou de enviar mídia. */
   onRemoteStream: (stream: MediaStream | null) => void;
   /** A conexão não se recupera sozinha: o dono deve recriá-la. */
@@ -23,11 +26,30 @@ export interface PeerLinkDeps {
   statsIntervalMs: number;
 }
 
+/** Tipo de um candidate ICE (de onde vem o endereço). */
+export type CandidateKind = 'host' | 'srflx' | 'prflx' | 'relay' | 'unknown';
+
+/** Por onde a conexão com um peer realmente passa (lido do par de candidates selecionado). */
+export interface ConnectionInfo {
+  type: 'p2p' | 'relay';
+  /** Nosso candidate e o do peer. `host` = rede local/IPv6 direto, `srflx` = via STUN, `relay` = TURN. */
+  local: CandidateKind;
+  remote: CandidateKind;
+  /** Protocolo do relay quando NOSSO lado usa TURN (`tcp`/`tls` costumam piorar o vídeo). */
+  relayProtocol: 'udp' | 'tcp' | 'tls' | null;
+  /** O endereço do nosso lado é IPv6. */
+  ipv6: boolean;
+}
+
+const CANDIDATE_KINDS: readonly CandidateKind[] = ['host', 'srflx', 'prflx', 'relay'];
+const asKind = (value: unknown): CandidateKind =>
+  CANDIDATE_KINDS.find((kind) => kind === value) ?? 'unknown';
+
 /**
- * Lê o par de candidates selecionado e diz se o tráfego passa por TURN (`relay`) ou é direto.
- * `null` quando ainda não há par selecionado.
+ * Lê o par de candidates selecionado e descreve o caminho: P2P ou relay (TURN), os tipos de
+ * candidate dos dois lados e o protocolo do relay. `null` quando ainda não há par selecionado.
  */
-export function detectConnectionType(stats: RTCStatsReport): 'p2p' | 'relay' | null {
+export function describeConnection(stats: RTCStatsReport): ConnectionInfo | null {
   const byId = new Map<string, Record<string, unknown>>();
   const pairs: Record<string, unknown>[] = [];
   let selectedPairId: unknown;
@@ -50,7 +72,26 @@ export function detectConnectionType(stats: RTCStatsReport): 'p2p' | 'relay' | n
   const local = byId.get(String(pair.localCandidateId));
   const remote = byId.get(String(pair.remoteCandidateId));
   if (!local && !remote) return null;
-  return local?.candidateType === 'relay' || remote?.candidateType === 'relay' ? 'relay' : 'p2p';
+
+  const localKind = asKind(local?.candidateType);
+  const remoteKind = asKind(remote?.candidateType);
+  const relayProtocol = localKind === 'relay' ? local?.relayProtocol : undefined;
+  const address = local?.address ?? local?.ip;
+  return {
+    type: localKind === 'relay' || remoteKind === 'relay' ? 'relay' : 'p2p',
+    local: localKind,
+    remote: remoteKind,
+    relayProtocol:
+      relayProtocol === 'udp' || relayProtocol === 'tcp' || relayProtocol === 'tls'
+        ? relayProtocol
+        : null,
+    ipv6: typeof address === 'string' && address.includes(':'),
+  };
+}
+
+/** Só o tipo (P2P ou relay) do par selecionado; `null` quando ainda não há par. */
+export function detectConnectionType(stats: RTCStatsReport): 'p2p' | 'relay' | null {
+  return describeConnection(stats)?.type ?? null;
 }
 
 /**
@@ -75,6 +116,7 @@ export class PeerLink {
   private remoteStream: MediaStream | null = null;
   private brokenTimer: ReturnType<typeof setTimeout> | undefined;
   private statsTimer: ReturnType<typeof setInterval> | undefined;
+  private lastConnection = '';
 
   constructor(deps: PeerLinkDeps) {
     this.deps = deps;
@@ -139,7 +181,11 @@ export class PeerLink {
     }
   }
 
-  /** Limita o bitrate de vídeo. `encodings` só existe depois da negociação; antes disso, ignora. */
+  /**
+   * Limita o vídeo enviado: bitrate máximo e resolução máxima (1080p). `encodings` só existe depois
+   * da negociação; antes disso, ignora. A captura já é pedida reduzida; aqui é a rede de segurança
+   * para navegadores que ignoram o limite da captura.
+   */
   async applyBitrate(): Promise<void> {
     if (this.closed) return;
     const maxBitrate = this.deps.getMaxBitrate();
@@ -149,8 +195,20 @@ export class PeerLink {
         const params = sender.getParameters();
         const encodings = params.encodings;
         if (!encodings || encodings.length === 0) continue;
-        if (encodings.every((encoding) => encoding.maxBitrate === maxBitrate)) continue;
-        for (const encoding of encodings) encoding.maxBitrate = maxBitrate;
+        const settings = sender.track.getSettings?.();
+        const scale = downscaleFactor(settings?.width, settings?.height);
+        const upToDate = encodings.every(
+          (encoding) =>
+            encoding.maxBitrate === maxBitrate && (encoding.scaleResolutionDownBy ?? 1) === scale,
+        );
+        if (upToDate) continue;
+        for (const encoding of encodings) {
+          encoding.maxBitrate = maxBitrate;
+          // Só grava a escala quando é preciso reduzir (ou desfazer uma redução antiga).
+          if (scale > 1 || encoding.scaleResolutionDownBy !== undefined) {
+            encoding.scaleResolutionDownBy = scale;
+          }
+        }
         await sender.setParameters(params);
       } catch (error) {
         console.warn('[peer] setParameters falhou:', error);
@@ -285,8 +343,14 @@ export class PeerLink {
   private async refreshConnectionType(): Promise<void> {
     if (this.closed || this.pc.connectionState !== 'connected') return;
     try {
-      const type = detectConnectionType(await this.pc.getStats());
-      if (type && !this.closed && this.pc.connectionState === 'connected') this.setStatus(type);
+      const info = describeConnection(await this.pc.getStats());
+      if (!info || this.closed || this.pc.connectionState !== 'connected') return;
+      this.setStatus(info.type);
+      const key = JSON.stringify(info);
+      if (key !== this.lastConnection) {
+        this.lastConnection = key;
+        this.deps.onConnection?.(info);
+      }
     } catch (error) {
       console.warn('[peer] getStats falhou:', error);
     }

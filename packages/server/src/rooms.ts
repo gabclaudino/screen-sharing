@@ -5,6 +5,8 @@ export interface Peer {
   id: string;
   name: string;
   sharing: boolean;
+  /** Id da foto de perfil; ausente = sem foto. */
+  avatar?: string;
   /** Sessão de login (do token) dona deste peer. */
   sid: string;
 }
@@ -17,6 +19,7 @@ export const toPeerInfo = (peer: Peer): PeerInfo => ({
   id: peer.id,
   name: peer.name,
   sharing: peer.sharing,
+  ...(peer.avatar === undefined ? {} : { avatar: peer.avatar }),
 });
 
 /** A única sala do app, em memória; não conhece sockets. */
@@ -28,7 +31,7 @@ export class Room {
     this.maxPeers = maxPeers;
   }
 
-  join(input: { name: string; sid: string; sharing?: boolean }): JoinResult {
+  join(input: { name: string; sid: string; sharing?: boolean; avatar?: string }): JoinResult {
     const nameKey = input.name.toLowerCase();
     let evicted: Peer | undefined;
 
@@ -53,6 +56,7 @@ export class Room {
       name: input.name,
       sharing: input.sharing ?? false,
       sid: input.sid,
+      ...(input.avatar === undefined ? {} : { avatar: input.avatar }),
     };
     this.peers.set(peer.id, peer);
 
@@ -73,6 +77,15 @@ export class Room {
   setSharing(peerId: string, active: boolean): Peer | undefined {
     const peer = this.peers.get(peerId);
     if (peer) peer.sharing = active;
+    return peer;
+  }
+
+  /** `null` remove a foto. Devolve `undefined` se o peer já saiu. */
+  setAvatar(peerId: string, avatar: string | null): Peer | undefined {
+    const peer = this.peers.get(peerId);
+    if (!peer) return undefined;
+    if (avatar === null) delete peer.avatar;
+    else peer.avatar = avatar;
     return peer;
   }
 

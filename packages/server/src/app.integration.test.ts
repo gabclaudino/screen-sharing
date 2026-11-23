@@ -571,6 +571,76 @@ describe('servidor (WebSocket)', () => {
     b.close();
   });
 
+  it('foto de perfil: vai no join, é entregue a quem entra e a troca/remoção avisa os outros', async () => {
+    const a = await TestClient.connect(running, await getToken(running));
+    const b = await TestClient.connect(running, await getToken(running));
+    const joinedA = await a.join('Ana', { avatar: 'guri-3' });
+    expect(joinedA.peers).toEqual([]);
+
+    const joinedB = await b.join('Bia');
+    expect(joinedB.peers).toEqual([
+      { id: joinedA.selfId, name: 'Ana', sharing: false, avatar: 'guri-3' },
+    ]);
+    // Bia entrou sem foto: o campo nem aparece.
+    expect(await a.next()).toEqual({
+      type: 'peer-joined',
+      peer: { id: joinedB.selfId, name: 'Bia', sharing: false },
+    });
+
+    b.send({ type: 'avatar', avatar: 'guri-7' });
+    expect(await a.next()).toEqual({ type: 'peer-avatar', id: joinedB.selfId, avatar: 'guri-7' });
+    await b.expectSilence(); // quem trocou não recebe o próprio aviso
+
+    b.send({ type: 'avatar', avatar: null });
+    expect(await a.next()).toEqual({ type: 'peer-avatar', id: joinedB.selfId, avatar: null });
+
+    // quem entra depois vê a foto atual de cada um
+    const c = await TestClient.connect(running, await getToken(running));
+    const joinedC = await c.join('Caio');
+    expect(joinedC.peers.find((p) => p.name === 'Ana')?.avatar).toBe('guri-3');
+    expect(joinedC.peers.find((p) => p.name === 'Bia')).not.toHaveProperty('avatar');
+    a.close();
+    b.close();
+    c.close();
+  });
+
+  it('foto de perfil: antes do join → INVALID; id inválido (URL, texto) → conexão fechada (1008)', async () => {
+    const a = await TestClient.connect(running, await getToken(running));
+    a.send({ type: 'avatar', avatar: 'guri-1' });
+    expect(await a.next()).toMatchObject({ type: 'error', code: 'INVALID' });
+    a.close();
+
+    for (const avatar of ['https://evil.example/x.png', '../../etc/passwd', 'a b']) {
+      const b = await TestClient.connect(running, await getToken(running));
+      await b.join('Bia');
+      b.send({ type: 'avatar', avatar });
+      expect((await b.closed).code).toBe(1008);
+    }
+    const c = await TestClient.connect(running, await getToken(running));
+    c.send({ type: 'join', name: 'Caio', avatar: '<script>' });
+    expect((await c.closed).code).toBe(1008);
+  });
+
+  it('a rajada de sinalização ao entrar (dezenas de candidates por peer) não derruba a conexão', async () => {
+    const a = await TestClient.connect(running, await getToken(running));
+    const b = await TestClient.connect(running, await getToken(running));
+    await a.join('Ana');
+    const joinedB = await b.join('Bia');
+    await a.next(); // peer-joined
+
+    // 150 mensagens de uma vez: o que 5 peers com ~30 candidates cada mandam ao entrar.
+    const candidate = { candidate: 'candidate:1 1 udp 1 1.2.3.4 5 typ host', sdpMid: '0' };
+    for (let i = 0; i < 150; i += 1) {
+      a.send({ type: 'signal', to: joinedB.selfId, data: { gen: 0, candidate } });
+    }
+    for (let i = 0; i < 150; i += 1) expect((await b.next()).type).toBe('signal');
+
+    a.send({ type: 'ping' });
+    expect(await a.next()).toEqual({ type: 'pong' }); // Ana segue conectada
+    a.close();
+    b.close();
+  });
+
   it('reaction em excesso é descartada em silêncio, sem derrubar a conexão', async () => {
     const a = await TestClient.connect(running, await getToken(running));
     const b = await TestClient.connect(running, await getToken(running));
@@ -642,6 +712,61 @@ describe('reações configuradas (REACTION_EMOJIS)', () => {
     await b.expectSilence();
     a.close();
     b.close();
+    await running.app.close();
+  });
+});
+
+describe('desligar e religar o servidor', () => {
+  it('ao desligar, todos os conectados recebem o código 4002 (voltam ao login)', async () => {
+    const running = await startApp();
+    const a = await TestClient.connect(running, await getToken(running));
+    const b = await TestClient.connect(running, await getToken(running));
+    await a.join('Ana');
+    await b.join('Bia');
+
+    const closing = running.app.close();
+    expect((await a.closed).code).toBe(4002);
+    expect((await b.closed).code).toBe(4002);
+    await closing;
+  });
+
+  it('o login de antes do reinício deixa de valer: WS, /api/ice e /api/session dão 401', async () => {
+    const before = await startApp();
+    const oldToken = await getToken(before);
+    const authHeader = { Authorization: `Bearer ${oldToken}` };
+    expect((await fetch(`${before.http}/api/session`, { headers: authHeader })).status).toBe(200);
+    await before.app.close();
+
+    // Mesma configuração (mesmo SESSION_SECRET), nova execução do servidor.
+    const after = await startApp();
+    expect((await fetch(`${after.http}/api/session`, { headers: authHeader })).status).toBe(401);
+    expect((await fetch(`${after.http}/api/ice`, { headers: authHeader })).status).toBe(401);
+    expect(
+      await upgradeStatus(`${after.ws}?token=${encodeURIComponent(oldToken)}`, { Origin: ORIGIN }),
+    ).toBe(401);
+
+    // Entrando de novo com a senha, tudo volta a funcionar.
+    const newToken = await getToken(after);
+    expect(
+      (
+        await fetch(`${after.http}/api/session`, {
+          headers: { Authorization: `Bearer ${newToken}` },
+        })
+      ).status,
+    ).toBe(200);
+    const client = await TestClient.connect(after, newToken);
+    await client.join('Ana');
+    client.close();
+    await after.app.close();
+  });
+
+  it('/api/session: sem token ou com token inválido → 401; só aceita GET', async () => {
+    const running = await startApp();
+    expect((await fetch(`${running.http}/api/session`)).status).toBe(401);
+    const bad = { Authorization: 'Bearer lixo' };
+    expect((await fetch(`${running.http}/api/session`, { headers: bad })).status).toBe(401);
+    const post = await fetch(`${running.http}/api/session`, { method: 'POST' });
+    expect(post.status).toBe(405);
     await running.app.close();
   });
 });

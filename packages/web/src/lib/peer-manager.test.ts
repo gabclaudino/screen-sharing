@@ -1,7 +1,7 @@
 import type { SignalData } from '@screenshare/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePeerConnection, FakeStream } from './fake-webrtc';
-import { PeerManager, type PeerStatus } from './peer-manager';
+import { PeerManager, type ConnectionInfo, type PeerStatus } from './peer-manager';
 
 // ID_A < ID_B: A é "polite", B é "impolite".
 const ID_A = '11111111-1111-4111-8111-111111111111';
@@ -22,6 +22,7 @@ interface Node {
   sent: { to: string; data: SignalData }[];
   streams: { peerId: string; streamId: string | null }[];
   statuses: { peerId: string; status: PeerStatus }[];
+  connections: { peerId: string; info: ConnectionInfo }[];
   lastPc(): FakePeerConnection;
 }
 
@@ -34,6 +35,7 @@ function makeNode(id: string, options: { deliver?: boolean } = {}): Node {
     sent: [],
     streams: [],
     statuses: [],
+    connections: [],
     mgr: undefined as never,
     lastPc() {
       const pc = this.pcs.at(-1);
@@ -61,6 +63,7 @@ function makeNode(id: string, options: { deliver?: boolean } = {}): Node {
     node.streams.push({ peerId, streamId: (stream as unknown as FakeStream | null)?.id ?? null }),
   );
   node.mgr.on('status', (e) => node.statuses.push(e));
+  node.mgr.on('connection', (e) => node.connections.push(e));
   network.set(id, node);
   return node;
 }
@@ -319,6 +322,35 @@ describe('bitrate', () => {
     expect(videoSender(a)?.params.encodings[0]?.maxBitrate).toBe(5_000_000);
   });
 
+  const screenStream = (id: string, width: number, height: number) =>
+    new FakeStream(id, [
+      { id: `${id}-v`, kind: 'video', getSettings: () => ({ width, height }) },
+    ]) as unknown as MediaStream;
+
+  it('limita a resolução enviada a 1080p quando a captura é maior (1440p e 4K)', async () => {
+    for (const [width, height, scale] of [
+      [2560, 1440, 2560 / 1920],
+      [3840, 2160, 2],
+    ] as const) {
+      const a = makeNode(ID_A);
+      const b = makeNode(ID_B);
+      await connectPair(a, b);
+      a.mgr.setLocalStream(screenStream(`t${width}`, width, height));
+      await settle();
+      expect(videoSender(a)?.params.encodings[0]?.scaleResolutionDownBy).toBeCloseTo(scale, 4);
+    }
+  });
+
+  it('captura que já cabe em 1080p não ganha escala (nada é ampliado nem reduzido)', async () => {
+    const a = makeNode(ID_A);
+    const b = makeNode(ID_B);
+    await connectPair(a, b);
+    a.mgr.setLocalStream(screenStream('hd', 1920, 1080));
+    await settle();
+    expect(videoSender(a)?.params.encodings[0]?.maxBitrate).toBe(2_500_000);
+    expect(videoSender(a)?.params.encodings[0]?.scaleResolutionDownBy).toBeUndefined();
+  });
+
   it('antes da negociação (encodings vazio) não chama setParameters', () => {
     const a = makeNode(ID_A, { deliver: false });
     a.mgr.setSelf(ID_A, [peer(ID_B)]);
@@ -504,6 +536,60 @@ describe('tipo de conexão (P2P vs relay)', () => {
   it('candidate local ou remoto relay → relay', async () => {
     expect(await connectedStatus('relay', 'host')).toBe('relay');
     expect(await connectedStatus('host', 'relay')).toBe('relay');
+  });
+
+  it('informa os detalhes do caminho: tipos de candidate, protocolo do relay e IPv6', async () => {
+    const connection = async (
+      local: 'host' | 'srflx' | 'relay',
+      remote: 'host' | 'srflx' | 'relay',
+      extra: { relayProtocol?: string; address?: string } = {},
+    ) => {
+      const a = makeNode(ID_A, { deliver: false });
+      a.mgr.setSelf(ID_A, [peer(ID_B)]);
+      a.lastPc().setSelectedPair(local, remote, extra);
+      a.lastPc().setConnectionState('connected');
+      await settle();
+      return a.connections.at(-1)?.info;
+    };
+
+    expect(await connection('host', 'host', { address: '2001:db8::1' })).toEqual({
+      type: 'p2p',
+      local: 'host',
+      remote: 'host',
+      relayProtocol: null,
+      ipv6: true,
+    });
+    expect(await connection('srflx', 'srflx', { address: '200.1.2.3' })).toMatchObject({
+      type: 'p2p',
+      ipv6: false,
+    });
+    expect(await connection('relay', 'host', { relayProtocol: 'udp' })).toMatchObject({
+      type: 'relay',
+      relayProtocol: 'udp',
+    });
+    expect(await connection('relay', 'srflx', { relayProtocol: 'tcp' })).toMatchObject({
+      relayProtocol: 'tcp',
+    });
+    // Relay do lado do outro: não dá para saber o protocolo dele.
+    expect(await connection('host', 'relay')).toMatchObject({ type: 'relay', relayProtocol: null });
+  });
+
+  it('só avisa os detalhes quando mudam (o getStats periódico não repete)', async () => {
+    vi.useFakeTimers();
+    const node = makeNode(ID_A, { deliver: false });
+    node.mgr.setSelf(ID_A, [peer(ID_B)]);
+    const pc = node.lastPc();
+    pc.setSelectedPair('host', 'host');
+    pc.setConnectionState('connected');
+    await vi.advanceTimersByTimeAsync(0);
+    pc.setConnectionState('connected');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(node.connections).toHaveLength(1);
+    pc.setSelectedPair('relay', 'host', { relayProtocol: 'tcp' });
+    pc.setConnectionState('connected');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(node.connections.map((c) => c.info.relayProtocol)).toEqual([null, 'tcp']);
+    vi.useRealTimers();
   });
 
   it('sem par selecionado ainda continua connecting (sem emitir mudança)', async () => {

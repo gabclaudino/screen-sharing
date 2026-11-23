@@ -157,6 +157,44 @@ describe('parseServerMessage', () => {
     }
   });
 
+  it('avatar: só ids simples (nunca URL ou texto livre), no join, na troca e no peer-info', () => {
+    for (const avatar of ['guri-1', 'a', 'foto_2', 'x'.repeat(32)]) {
+      expect(parseClientMessage(JSON.stringify({ type: 'avatar', avatar })).ok).toBe(true);
+      expect(parseClientMessage(JSON.stringify({ type: 'join', name: 'Ana', avatar })).ok).toBe(
+        true,
+      );
+    }
+    expect(parseClientMessage(JSON.stringify({ type: 'avatar', avatar: null })).ok).toBe(true);
+    for (const avatar of [
+      '',
+      'Guri-1',
+      '-x',
+      'a b',
+      '/fotos/x.jpg',
+      'http://evil.example/x',
+      '<img>',
+      'x'.repeat(33),
+      1,
+    ]) {
+      expect(parseClientMessage(JSON.stringify({ type: 'avatar', avatar })).ok).toBe(false);
+      expect(parseClientMessage(JSON.stringify({ type: 'join', name: 'Ana', avatar })).ok).toBe(
+        false,
+      );
+    }
+    expect(parseClientMessage(JSON.stringify({ type: 'avatar' })).ok).toBe(false);
+
+    const peer = { id: ID_B, name: 'Bia', sharing: false };
+    const peerJoined = (p: object) => JSON.stringify({ type: 'peer-joined', peer: p });
+    expect(parseServerMessage(peerJoined(peer)).ok).toBe(true);
+    expect(parseServerMessage(peerJoined({ ...peer, avatar: 'guri-1' })).ok).toBe(true);
+    expect(parseServerMessage(peerJoined({ ...peer, avatar: '/x' })).ok).toBe(false);
+    const peerAvatar = (avatar: unknown) =>
+      JSON.stringify({ type: 'peer-avatar', id: ID_B, avatar });
+    expect(parseServerMessage(peerAvatar('a')).ok).toBe(true);
+    expect(parseServerMessage(peerAvatar(null)).ok).toBe(true);
+    expect(parseServerMessage(peerAvatar('A B')).ok).toBe(false);
+  });
+
   it('reaction: um único emoji, nos dois sentidos', () => {
     for (const emoji of [...DEFAULT_REACTION_EMOJIS, '🐸', '🇧🇷', '👨‍👩‍👧', '👍🏽']) {
       expect(parseClientMessage(JSON.stringify({ type: 'reaction', emoji })).ok).toBe(true);

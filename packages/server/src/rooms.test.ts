@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Room } from './rooms';
+import { Room, toPeerInfo } from './rooms';
 
 function mustJoin(room: Room, name: string, sid = `sid-${name}`) {
   const result = room.join({ name, sid });
@@ -24,6 +24,26 @@ describe('Room (sala única)', () => {
     expect(a.peer.id).not.toBe(b.peer.id);
     expect(a.peer.sharing).toBe(true);
     expect(b.peer.sharing).toBe(false);
+  });
+
+  it('guarda a foto de perfil, a entrega a quem entra depois e permite trocar e remover', () => {
+    const room = new Room(6);
+    const a = room.join({ name: 'Ana', sid: 's1', avatar: 'guri-1' });
+    if (!a.ok) throw new Error('join falhou');
+    expect(a.peer.avatar).toBe('guri-1');
+    expect(toPeerInfo(a.peer)).toEqual({
+      id: a.peer.id,
+      name: 'Ana',
+      sharing: false,
+      avatar: 'guri-1',
+    });
+
+    expect(room.setAvatar(a.peer.id, 'guri-2')?.avatar).toBe('guri-2');
+    expect(mustJoin(room, 'Bia').others[0]?.avatar).toBe('guri-2');
+    const removed = room.setAvatar(a.peer.id, null);
+    expect(removed?.avatar).toBeUndefined();
+    expect(removed ? 'avatar' in toPeerInfo(removed) : true).toBe(false); // sem foto: campo ausente
+    expect(room.setAvatar('nao-existe', 'guri-1')).toBeUndefined();
   });
 
   it('respeita o limite de peers', () => {

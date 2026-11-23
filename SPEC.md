@@ -99,9 +99,10 @@ Validação de campos: `name` tem 1–30 chars após `trim`, sem caracteres de c
 
 | `type` | Campos | Descrição |
 |---|---|---|
-| `join` | `name`, `sharing?: boolean` | Entra na sala única (não há campo de sala; um `join` com `room` é inválido). `sharing` é `true` ao reentrar após reconexão enquanto ainda compartilha |
+| `join` | `name`, `sharing?: boolean`, `avatar?` | Entra na sala única (não há campo de sala; um `join` com `room` é inválido). `sharing` é `true` ao reentrar após reconexão enquanto ainda compartilha |
 | `signal` | `to`, `data` | Repassa a um peer: `{ gen: number, description?: RTCSessionDescriptionInit, candidate?: RTCIceCandidateInit, reset?: true }`. `sdp` limitado a 32 KB e `candidate` a 2 KB (validado no schema) |
 | `sharing` | `active: boolean` | Informa que começou/parou de compartilhar |
+| `avatar` | `avatar: string \| null` | Troca (id) ou remove (`null`) a própria foto de perfil. O id é de uma foto pré-definida no cliente (`^[a-z0-9][a-z0-9_-]{0,31}$`); URL ou texto livre é mensagem inválida (1008) |
 | `reaction` | `emoji` | Reação rápida; `emoji` é um único emoji (texto é mensagem inválida → 1008); se não estiver na lista `REACTION_EMOJIS` do servidor (padrão 😂 🔥 💀 👏 ❤️ 😮) é descartado em silêncio. Limite de 5 por segundo por pessoa (o excesso é descartado sem erro) |
 | `ping` | — | Heartbeat |
 | `leave` | — | Sai da sala |
@@ -115,6 +116,7 @@ Validação de campos: `name` tem 1–30 chars após `trim`, sem caracteres de c
 | `peer-left` | `id` | Participante saiu |
 | `signal` | `from`, `data` | Repasse de sinalização |
 | `peer-sharing` | `id`, `active` | Estado de compartilhamento de um peer |
+| `peer-avatar` | `id`, `avatar: string \| null` | Um peer trocou ou removeu a foto de perfil (não volta para quem trocou). `peers` e `peer-joined` também trazem `avatar?` (ausente = sem foto) |
 | `reaction` | `from`, `emoji` | Reação de outra pessoa (não volta para quem enviou) |
 | `error` | `code`, `message` | `ROOM_FULL`, `NAME_TAKEN`, `ALREADY_JOINED`, `SHARE_BUSY`, `RATE_LIMITED`, `INVALID` |
 | `pong` | — | Resposta ao heartbeat |
@@ -177,7 +179,7 @@ Uso privado entre amigos, então sem sistema de contas.
 
 - **Senha compartilhada:** `ACCESS_PASSWORD` no env. Comparação em tempo constante (`crypto.timingSafeEqual`, comparando hashes SHA-256 de mesmo tamanho para não vazar comprimento). A senha é enviada **só** no `POST /api/login`; o WS e o `join` não a carregam (a posse do token é a prova). Salas com senha própria ficam fora do v1.
 - **Fluxo de login (cliente):** JoinForm → `POST /api/login { password }` → em caso de 200, guarda o token **só em memória** (nada em `sessionStorage`/`localStorage`) → abre `/ws?token=...` → envia `join`. Senha errada → HTTP 401 e mensagem "senha incorreta" na UI. **A senha é exigida SEMPRE para entrar na sala**, haja ou não alguém nela: sair da sala ou recarregar a página (F5) descarta o token e pede a senha de novo. O token só serve para reconectar o WebSocket dentro da mesma sala aberta (queda de rede), até expirar.
-- **Token de sessão:** `POST /api/login` devolve `{ token, expiresAt }`, assinado com HMAC (`SESSION_SECRET`, expiração 12 h), usado como `Authorization: Bearer` no `/api/ice` e como query param do WS (`/ws?token=...`). O WS rejeita upgrade sem token válido (HTTP 401). O token no query string é aceito por limitação da API de WebSocket do navegador; por isso **não logar a URL do upgrade**.
+- **Token de sessão:** `POST /api/login` devolve `{ token, expiresAt }`, assinado com HMAC (`SESSION_SECRET`, expiração 12 h), usado como `Authorization: Bearer` no `/api/ice` e como query param do WS (`/ws?token=...`). O WS rejeita upgrade sem token válido (HTTP 401). O token no query string é aceito por limitação da API de WebSocket do navegador; por isso **não logar a URL do upgrade**. **O token só vale na execução do servidor que o emitiu:** a chave de assinatura é `SESSION_SECRET` + um id aleatório gerado a cada subida, então desligar e religar (ou uma queda) invalida todos os logins e todos precisam digitar a senha de novo. `GET /api/session` (Bearer) responde 200 se o login ainda vale e 401 se não; o cliente a consulta antes de cada reconexão e, em 401, volta à tela de entrada. Ao desligar com educação o servidor fecha cada WS com o código **4002** (`server shutting down`), e o cliente volta ao login sem reconectar (o 1001 não serve: o Cloudflare também o envia ao reiniciar o túnel). O `DESLIGAR.bat` pede o desligamento criando `logs/desligar.flag`, que o servidor confere a cada 0,5 s (sem porta de controle nem senha); sem resposta em 6 s o script encerra o processo à força.
 - **Token expirado:** se o upgrade falhar com 401 ou o token estiver a menos de 5 min de expirar ao reconectar, o cliente descarta o token e volta ao JoinForm com a senha pré-solicitada ("sessão expirou"). A senha **não** é guardada pelo cliente.
 - **Origin check** no upgrade do WebSocket contra `ALLOWED_ORIGIN` (ex.: `https://share.seudominio.com`). Em desenvolvimento (`NODE_ENV=development`) é aceita também a origem do Vite (`http://localhost:5173`).
 - **IP do cliente:** o header `CF-Connecting-IP` só é considerado quando o socket remoto é loopback (`127.0.0.1`/`::1`, i.e., o `cloudflared`); caso contrário usa-se o IP do socket. Do contrário seria spoofável.
@@ -234,7 +236,7 @@ SESSION_TTL_HOURS=12
 MAX_PEERS_PER_ROOM=6
 LOGIN_RATE_MAX=10              # tentativas de login por janela
 LOGIN_RATE_WINDOW_MIN=10
-WS_MSG_RATE_PER_SEC=50
+WS_MSG_RATE_PER_SEC=400
 STATIC_DIR=packages/web/dist
 ICE_PROVIDER=cloudflare        # cloudflare | metered | none
 ICE_CREDENTIAL_TTL_SEC=86400

@@ -154,6 +154,43 @@ describe('SignalingClient', () => {
     ]);
   });
 
+  it('o join leva a foto de perfil atual (inclusive ao reentrar); sem foto, não leva o campo', () => {
+    let avatar: string | null = 'guri-2';
+    const client = make({ getAvatar: () => avatar });
+    client.connect();
+    last().open();
+    expect(last().sent).toEqual([{ type: 'join', name: 'Ana', avatar: 'guri-2' }]);
+
+    avatar = null;
+    const other = make({ getAvatar: () => avatar });
+    other.connect();
+    last().open();
+    expect(last().sent).toEqual([{ type: 'join', name: 'Ana' }]);
+  });
+
+  it('sendAvatar só envia conectado e peer-avatar do servidor vira evento', () => {
+    const { client, socket } = connected();
+    const events: unknown[] = [];
+    client.on('peer-avatar', (e) => events.push(e));
+
+    expect(client.sendAvatar('guri-4')).toBe(true);
+    expect(client.sendAvatar(null)).toBe(true);
+    expect(socket.sent.slice(-2)).toEqual([
+      { type: 'avatar', avatar: 'guri-4' },
+      { type: 'avatar', avatar: null },
+    ]);
+
+    socket.receive({ type: 'peer-avatar', id: ID_B, avatar: 'guri-1' });
+    socket.receive({ type: 'peer-avatar', id: ID_B, avatar: null });
+    expect(events).toEqual([
+      { id: ID_B, avatar: 'guri-1' },
+      { id: ID_B, avatar: null },
+    ]);
+
+    client.disconnect();
+    expect(client.sendAvatar('guri-4')).toBe(false);
+  });
+
   it('sendReaction só envia conectado e reaction do servidor vira evento', () => {
     const { client, socket } = connected();
     const events: unknown[] = [];
@@ -352,10 +389,11 @@ describe('SignalingClient', () => {
     expect(client.status).toBe('connected');
   });
 
-  it('close 1008 (policy) e 4001 (replaced) são definitivos', () => {
+  it('close 1008 (policy), 4001 (replaced) e 4002 (servidor desligado) são definitivos', () => {
     for (const [code, reason] of [
       [1008, 'policy'],
       [4001, 'replaced'],
+      [4002, 'server-shutdown'],
     ] as const) {
       FakeSocket.instances = [];
       const { client, socket } = connected();
@@ -365,6 +403,56 @@ describe('SignalingClient', () => {
       vi.advanceTimersByTime(60_000);
       expect(FakeSocket.instances).toHaveLength(1);
     }
+  });
+
+  describe('login depois de o servidor ser religado (validateSession)', () => {
+    it('login que não vale mais (401) → auth-expired, sem abrir novo socket', async () => {
+      const validateSession = vi.fn(() => Promise.resolve(false));
+      const { client, socket } = connected({ validateSession });
+      const reasons = closedReasons(client);
+      socket.drop();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(validateSession).toHaveBeenCalledTimes(1);
+      expect(reasons).toEqual(['auth-expired']);
+      expect(client.status).toBe('closed');
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(FakeSocket.instances).toHaveLength(1);
+    });
+
+    it('login que ainda vale → reconecta normalmente', async () => {
+      const { socket } = connected({ validateSession: () => Promise.resolve(true) });
+      socket.drop();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(FakeSocket.instances).toHaveLength(2);
+    });
+
+    it('a verificação falhar (servidor ainda fora do ar) não impede a reconexão', async () => {
+      const { socket } = connected({ validateSession: () => Promise.reject(new Error('rede')) });
+      socket.drop();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(FakeSocket.instances).toHaveLength(2);
+    });
+
+    it('sair da sala enquanto a verificação roda cancela a reconexão', async () => {
+      let answer: (valid: boolean) => void = () => undefined;
+      const validateSession = () => new Promise<boolean>((resolve) => (answer = resolve));
+      const { client, socket } = connected({ validateSession });
+      const reasons = closedReasons(client);
+      socket.drop();
+      await vi.advanceTimersByTimeAsync(1_000); // verificação em andamento
+      client.disconnect();
+      answer(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(FakeSocket.instances).toHaveLength(1);
+      expect(reasons).toEqual(['disconnect']);
+    });
+
+    it('sem a opção, reconecta direto (comportamento de sempre)', () => {
+      const { socket } = connected();
+      socket.drop();
+      vi.advanceTimersByTime(1_000);
+      expect(FakeSocket.instances).toHaveLength(2);
+    });
   });
 
   it('disconnect() envia leave, fecha o socket e não reconecta', () => {

@@ -57,10 +57,16 @@ export const nameSchema = z
 
 export const peerIdSchema = z.uuid();
 
+// Foto de perfil: só o *id* de uma foto pré-definida (a lista e os arquivos ficam no cliente);
+// nunca uma URL nem um arquivo enviado. Um id que o cliente não conhece vira a imagem padrão.
+export const avatarIdSchema = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,31}$/);
+
 export const peerInfoSchema = z.strictObject({
   id: peerIdSchema,
   name: nameSchema,
   sharing: z.boolean(),
+  // Ausente = sem foto de perfil.
+  avatar: avatarIdSchema.optional(),
 });
 export type PeerInfo = z.infer<typeof peerInfoSchema>;
 
@@ -109,6 +115,8 @@ export const joinMessageSchema = z.strictObject({
   name: nameSchema,
   // true ao reentrar após reconexão enquanto ainda está compartilhando.
   sharing: z.boolean().optional(),
+  // Foto de perfil escolhida (id); sem ela, a pessoa entra sem foto.
+  avatar: avatarIdSchema.optional(),
 });
 
 export const signalToServerSchema = z.strictObject({
@@ -120,6 +128,12 @@ export const signalToServerSchema = z.strictObject({
 export const sharingMessageSchema = z.strictObject({
   type: z.literal('sharing'),
   active: z.boolean(),
+});
+
+// Troca (id) ou remove (null) a própria foto de perfil.
+export const avatarMessageSchema = z.strictObject({
+  type: z.literal('avatar'),
+  avatar: avatarIdSchema.nullable(),
 });
 
 // Só emojis da lista: o servidor não repassa texto livre (evita abuso e mensagens grandes).
@@ -140,6 +154,7 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
   joinMessageSchema,
   signalToServerSchema,
   sharingMessageSchema,
+  avatarMessageSchema,
   reactionToServerSchema,
   pingMessageSchema,
   leaveMessageSchema,
@@ -195,6 +210,12 @@ export const peerSharingMessageSchema = z.strictObject({
   active: z.boolean(),
 });
 
+export const peerAvatarMessageSchema = z.strictObject({
+  type: z.literal('peer-avatar'),
+  id: peerIdSchema,
+  avatar: avatarIdSchema.nullable(),
+});
+
 export const reactionToClientSchema = z.strictObject({
   type: z.literal('reaction'),
   from: peerIdSchema,
@@ -215,6 +236,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   peerLeftMessageSchema,
   signalToClientSchema,
   peerSharingMessageSchema,
+  peerAvatarMessageSchema,
   reactionToClientSchema,
   errorMessageSchema,
   pongMessageSchema,

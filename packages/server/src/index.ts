@@ -1,6 +1,9 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createApp } from './app';
 import { ConfigError, loadConfig, type Config } from './config';
 import { createConsoleLogger } from './logger';
+import { watchShutdownFlag } from './shutdown-flag';
 
 const logger = createConsoleLogger();
 
@@ -37,6 +40,11 @@ const shutdown = (signal: string): void => {
 };
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+// O DESLIGAR.bat cria logs/desligar.flag (o Windows não entrega SIGTERM a um processo escondido):
+// assim o servidor avisa todo mundo antes de sair, e a sala volta para a tela de entrada.
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+watchShutdownFlag(path.join(repoRoot, 'logs', 'desligar.flag'), () => shutdown('desligar.flag'));
 
 // Promise rejeitada sem tratamento: registra e segue (um peer com problema não derruba a sala).
 process.on('unhandledRejection', (reason) => {

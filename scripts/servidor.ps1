@@ -174,7 +174,18 @@ function Invoke-Desligar {
     return
   }
 
-  foreach ($p in $processos) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
+  # Primeiro pede com educação (arquivo logs\desligar.flag): o servidor avisa todos, que voltam para a
+  # tela de entrada, e encerra sozinho. Se não responder (versão antiga ou travado), encerra à força.
+  New-Item -ItemType Directory -Force $logDir | Out-Null
+  $pedido = Join-Path $logDir 'desligar.flag'
+  New-Item -ItemType File -Force $pedido | Out-Null
+  $espera = (Get-Date).AddSeconds(6)
+  while ((Test-PortaOcupada) -and (Get-Date) -lt $espera) { Start-Sleep -Milliseconds 300 }
+  Remove-Item $pedido -Force -ErrorAction SilentlyContinue
+
+  if (Test-PortaOcupada) {
+    foreach ($p in $processos) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
+  }
   $limite = (Get-Date).AddSeconds(10)
   while ((Test-PortaOcupada) -and (Get-Date) -lt $limite) { Start-Sleep -Milliseconds 300 }
 
@@ -182,7 +193,7 @@ function Invoke-Desligar {
     Write-Erro 'Não consegui desligar. Encerre o processo "node" no Gerenciador de Tarefas.'
     exit 1
   }
-  Write-Ok 'Servidor DESLIGADO. Quem estava na sala foi desconectado.'
+  Write-Ok 'Servidor DESLIGADO. Quem estava na sala foi desconectado e precisará entrar de novo com a senha.'
   Write-Host '       (O túnel continua ativo, mas sem o app o endereço mostra um erro 502: é normal.)'
   Write-Host ''
 }

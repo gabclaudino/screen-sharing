@@ -45,6 +45,9 @@ const REACTIONS_PER_SEC = 5;
 
 const WS_CLOSE_POLICY = 1008;
 const WS_CLOSE_REPLACED = 4001;
+// Servidor desligando: o cliente volta à tela de entrada em vez de ficar tentando reconectar.
+// Código próprio de propósito: o 1001 também pode vir de um reinício do Cloudflare/túnel.
+const WS_CLOSE_SHUTDOWN = 4002;
 
 function rawToString(data: RawData): string {
   if (Array.isArray(data)) return Buffer.concat(data).toString('utf8');
@@ -102,6 +105,7 @@ export function createSignaling(options: SignalingOptions) {
       name: resolveDisplayName(msg.name, config.nameAliases),
       sid: conn.sid,
       sharing: msg.sharing === true && !shareBusy,
+      ...(msg.avatar === undefined ? {} : { avatar: msg.avatar }),
     });
     if (!result.ok) {
       const text = result.code === 'ROOM_FULL' ? 'Sala cheia' : 'Nome já em uso na sala';
@@ -148,6 +152,16 @@ export function createSignaling(options: SignalingOptions) {
       case 'leave':
         leaveRoom(conn);
         return;
+      case 'avatar': {
+        const self = conn.peerId === undefined ? undefined : room.get(conn.peerId);
+        if (!self) {
+          sendError(conn, 'INVALID', 'Entre na sala primeiro');
+          return;
+        }
+        room.setAvatar(self.id, msg.avatar);
+        broadcast(self.id, { type: 'peer-avatar', id: self.id, avatar: msg.avatar });
+        return;
+      }
       case 'reaction': {
         const self = conn.peerId === undefined ? undefined : room.get(conn.peerId);
         if (!self) {
@@ -210,6 +224,8 @@ export function createSignaling(options: SignalingOptions) {
     ws.on('message', (data, isBinary) => {
       conn.lastSeen = Date.now();
       if (!conn.limiter.hit('msg')) {
+        // Sem isto a causa é invisível: a pessoa só vê "Muitas mensagens" e o log mostra join+leave.
+        logger.warn('ws_rate_limited', { peer: conn.peerId });
         sendError(conn, 'RATE_LIMITED', 'Muitas mensagens');
         ws.close(WS_CLOSE_POLICY, 'rate limited');
         return;
@@ -257,7 +273,7 @@ export function createSignaling(options: SignalingOptions) {
 
   const close = (): void => {
     clearInterval(heartbeat);
-    for (const conn of connections) conn.ws.close(1001, 'server shutting down');
+    for (const conn of connections) conn.ws.close(WS_CLOSE_SHUTDOWN, 'server shutting down');
   };
 
   /** Antes do upgrade: há espaço para mais uma conexão deste login e do servidor? */

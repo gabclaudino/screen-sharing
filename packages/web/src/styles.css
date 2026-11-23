@@ -243,19 +243,30 @@ button:focus-visible {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 6px 8px;
 }
 
-.participants li > span:first-child {
-  flex: 1 1 100%;
+.participant-name {
+  flex: 1 1 0;
+  min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* Etiquetas abaixo do nome, alinhadas com ele (depois do avatar de 32 px + espaço). */
+.participant-badges {
+  flex: 1 1 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-left: 40px;
 }
 
 .room-footer {
   grid-area: footer;
   border-top: 1px solid var(--border);
   background: var(--panel);
-  padding: 10px 16px;
+  /* 16px embaixo e à direita: o botão "Não clique" fica com o mesmo respiro nos dois lados. */
+  padding: 10px 16px 16px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -373,9 +384,11 @@ label.inline {
 /* ---------- Telas estreitas ---------- */
 
 @media (max-width: 760px) {
+  /* Player fixo no alto (sempre visível, 16:9), participantes embaixo com rolagem própria e o
+     rodapé só com as reações. A página em si não rola. */
   .room {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr) auto auto;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
     grid-template-areas:
       'header'
       'stage'
@@ -383,10 +396,47 @@ label.inline {
       'footer';
   }
 
+  .stage {
+    padding: 10px 12px;
+    overflow: visible;
+  }
+
+  .grid {
+    height: auto;
+    grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: auto;
+  }
+
+  .tile {
+    aspect-ratio: 16 / 9;
+    /* Celular deitado: o player não pode comer a tela toda. */
+    max-height: 55dvh;
+  }
+
+  .empty-wide {
+    display: none;
+  }
+
   .sidebar {
+    min-height: 0;
+    overflow-y: auto;
     border-left: 0;
     border-top: 1px solid var(--border);
-    max-height: 30vh;
+  }
+
+  .room-footer {
+    padding: 8px 12px 12px;
+  }
+}
+
+/* O player vazio só existe no celular; nas telas largas vale o aviso centralizado. */
+.stage-empty-narrow {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .stage-empty-narrow {
+    display: grid;
   }
 }
 
@@ -659,6 +709,27 @@ dialog.guide::backdrop {
   transform: rotate(-4deg);
 }
 
+.bg-photo-7 {
+  top: 3%;
+  left: 28%;
+  width: 120px;
+  transform: rotate(5deg);
+}
+
+.bg-photo-8 {
+  top: 4%;
+  right: 27%;
+  width: 125px;
+  transform: rotate(-3deg);
+}
+
+.bg-photo-9 {
+  bottom: 3%;
+  left: 43%;
+  width: 105px;
+  transform: rotate(3deg);
+}
+
 /* Celular: o formulário ocupa a largura toda, então as fotos vão para as faixas de cima e de baixo. */
 @media (max-width: 760px) {
   .bg-photo {
@@ -698,6 +769,23 @@ dialog.guide::backdrop {
     top: auto;
     bottom: 2%;
     right: 5%;
+  }
+
+  /* Segunda fileira, mais para dentro: o formulário (z-index maior) cobre o que se sobrepuser. */
+  .bg-photo-7 {
+    top: 17%;
+    left: 8%;
+  }
+
+  .bg-photo-8 {
+    top: 17.5%;
+    right: 8%;
+    left: auto;
+  }
+
+  .bg-photo-9 {
+    bottom: 17%;
+    left: 40%;
   }
 }
 
@@ -801,4 +889,136 @@ dialog.guide::backdrop {
       transform: translateX(-50%);
     }
   }
+}
+
+/* ---------- Botão "Não clique" ---------- */
+
+/* Reações à esquerda, "Não clique" no canto direito do rodapé. */
+.footer-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dont-click {
+  margin-left: auto;
+  align-self: flex-end;
+  font-size: 0.85rem;
+}
+
+dialog.meme {
+  width: fit-content;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  padding: 12px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  text-align: center;
+}
+
+dialog.meme::backdrop {
+  background: rgba(0, 0, 0, 0.7);
+}
+
+dialog.meme img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 110px);
+  margin: 0 auto 10px;
+  border-radius: 8px;
+}
+
+.meme-missing {
+  margin: 20px 40px;
+  font-size: 1.1rem;
+}
+
+/* ---------- Foto de perfil ---------- */
+
+.avatar {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 50%;
+  color: var(--muted);
+  background: var(--border);
+}
+
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* O ícone padrão ocupa só parte do círculo, para parecer uma silhueta dentro dele. */
+.avatar svg {
+  width: 72%;
+  height: 72%;
+  margin-top: 14%;
+}
+
+.avatar-button {
+  flex: none;
+  padding: 0;
+  line-height: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+}
+
+.avatar-button:hover,
+.avatar-button:focus-visible {
+  border-color: #4c8dff;
+}
+
+dialog.avatar-picker {
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  padding: 18px 20px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+dialog.avatar-picker::backdrop {
+  background: rgba(0, 0, 0, 0.65);
+}
+
+dialog.avatar-picker h2 {
+  margin: 0 0 14px;
+  font-size: 1.1rem;
+}
+
+.avatar-options {
+  max-height: calc(100vh - 190px);
+  overflow-y: auto;
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 10px;
+}
+
+.avatar-option {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px;
+  font-size: 0.8rem;
+}
+
+.avatar-option[aria-pressed='true'] {
+  border-color: #4c8dff;
+  background: rgba(76, 141, 255, 0.15);
 }
