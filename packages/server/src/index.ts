@@ -44,7 +44,10 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 // O DESLIGAR.bat cria logs/desligar.flag (o Windows não entrega SIGTERM a um processo escondido):
 // assim o servidor avisa todo mundo antes de sair, e a sala volta para a tela de entrada.
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-watchShutdownFlag(path.join(repoRoot, 'logs', 'desligar.flag'), () => shutdown('desligar.flag'));
+// Só em produção: um servidor de desenvolvimento ligado junto não pode "roubar" o pedido.
+if (config.nodeEnv === 'production') {
+  watchShutdownFlag(path.join(repoRoot, 'logs', 'desligar.flag'), () => shutdown('desligar.flag'));
+}
 
 // Promise rejeitada sem tratamento: registra e segue (um peer com problema não derruba a sala).
 process.on('unhandledRejection', (reason) => {

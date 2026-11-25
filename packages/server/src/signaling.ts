@@ -2,6 +2,7 @@ import {
   parseClientMessage,
   type ClientMessage,
   type ErrorCode,
+  type RouletteCommand,
   type ServerMessage,
 } from '@screenshare/shared';
 import type { RawData, WebSocket } from 'ws';
@@ -9,6 +10,7 @@ import type { Config } from './config';
 import type { Logger } from './logger';
 import { resolveDisplayName } from './names';
 import { Room, toPeerInfo } from './rooms';
+import { Roulette } from './roulette';
 import { RateLimiter } from './security';
 
 export interface SignalingOptions {
@@ -24,6 +26,8 @@ export interface SignalingOptions {
   maxConnections?: number;
   /** Quanto esperar o `join` depois de abrir a conexão (padrão 15 s). */
   joinTimeoutMs?: number;
+  /** Duração do giro da roleta; encurtada nos testes. */
+  rouletteSpinMs?: number;
 }
 
 export interface ConnectionContext {
@@ -38,10 +42,13 @@ interface Connection {
   lastSeen: number;
   limiter: RateLimiter;
   reactionLimiter: RateLimiter;
+  rouletteLimiter: RateLimiter;
 }
 
 // No máximo 5 reações por segundo por pessoa; o que passar disso é ignorado.
 const REACTIONS_PER_SEC = 5;
+// Cada comando da roleta é repassado a todos: folga para digitar nomes, sem virar inundação.
+const ROULETTE_COMMANDS_PER_SEC = 20;
 
 const WS_CLOSE_POLICY = 1008;
 const WS_CLOSE_REPLACED = 4001;
@@ -79,6 +86,32 @@ export function createSignaling(options: SignalingOptions) {
     }
   };
 
+  const roulette = new Roulette({
+    onResolve: () => broadcastRoulette(),
+    ...(options.rouletteSpinMs === undefined ? {} : { spinMs: options.rouletteSpinMs }),
+  });
+  /** Manda o estado da roleta a todos (inclusive quem pediu a mudança). */
+  const broadcastRoulette = (exceptPeerId = ''): void =>
+    broadcast(exceptPeerId, { type: 'roulette', state: roulette.toState() });
+
+  const handleRoulette = (peerId: string, command: RouletteCommand): boolean => {
+    switch (command.action) {
+      case 'claim':
+        return roulette.claim(peerId);
+      case 'release':
+        return roulette.release(peerId);
+      case 'add':
+        // Os apelidos configurados valem aqui como na lista de participantes.
+        return roulette.add(peerId, resolveDisplayName(command.name, config.nameAliases));
+      case 'remove':
+        return roulette.remove(peerId, command.name);
+      case 'spin':
+        return roulette.start(peerId);
+      case 'reset':
+        return roulette.reset(peerId, command.clear);
+    }
+  };
+
   const leaveRoom = (conn: Connection): void => {
     const peerId = conn.peerId;
     if (peerId === undefined) return;
@@ -87,6 +120,8 @@ export function createSignaling(options: SignalingOptions) {
     const peer = room.leave(peerId);
     if (!peer) return;
     broadcast(peer.id, { type: 'peer-left', id: peer.id });
+    if (room.size === 0) roulette.clear();
+    else if (roulette.release(peer.id)) broadcastRoulette();
     logger.info('leave', { peer: peer.id });
   };
 
@@ -128,14 +163,17 @@ export function createSignaling(options: SignalingOptions) {
 
     conn.peerId = peer.id;
     byPeerId.set(peer.id, conn);
+    const handedOver = evicted !== undefined && roulette.handover(evicted.id, peer.id);
     send(conn.ws, {
       type: 'joined',
       selfId: peer.id,
       selfName: peer.name,
       reactions: [...config.reactionEmojis],
       peers: others.map(toPeerInfo),
+      roulette: roulette.toState(),
     });
     broadcast(peer.id, { type: 'peer-joined', peer: toPeerInfo(peer) });
+    if (handedOver) broadcastRoulette(peer.id);
     // Avisa o cliente para parar a captura que ele ainda tem ativa.
     if (shareBusy) sendError(conn, 'SHARE_BUSY', 'Outra pessoa já está compartilhando');
     logger.info('join', { peer: peer.id });
@@ -175,6 +213,17 @@ export function createSignaling(options: SignalingOptions) {
         broadcast(self.id, { type: 'reaction', from: self.id, emoji: msg.emoji });
         return;
       }
+      case 'roulette': {
+        const self = conn.peerId === undefined ? undefined : room.get(conn.peerId);
+        if (!self) {
+          sendError(conn, 'INVALID', 'Entre na sala primeiro');
+          return;
+        }
+        if (!conn.rouletteLimiter.hit('roulette')) return;
+        // Pedido que não vale (outra pessoa no controle, durante o giro...) é ignorado.
+        if (handleRoulette(self.id, msg.command)) broadcastRoulette();
+        return;
+      }
       case 'signal':
       case 'sharing': {
         const self = conn.peerId === undefined ? undefined : room.get(conn.peerId);
@@ -210,6 +259,7 @@ export function createSignaling(options: SignalingOptions) {
       lastSeen: Date.now(),
       limiter: new RateLimiter(config.wsMsgRatePerSec, 1000),
       reactionLimiter: new RateLimiter(REACTIONS_PER_SEC, 1000),
+      rouletteLimiter: new RateLimiter(ROULETTE_COMMANDS_PER_SEC, 1000),
     };
     connections.add(conn);
 
@@ -273,6 +323,7 @@ export function createSignaling(options: SignalingOptions) {
 
   const close = (): void => {
     clearInterval(heartbeat);
+    roulette.clear();
     for (const conn of connections) conn.ws.close(WS_CLOSE_SHUTDOWN, 'server shutting down');
   };
 

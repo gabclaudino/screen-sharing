@@ -28,6 +28,7 @@ describe('roomReducer', () => {
       selfId: null,
       selfName: null,
       reactions: null,
+      roulette: null,
       peers: {},
       everJoined: false,
       iceFallback: false,
@@ -270,5 +271,22 @@ describe('conexão: textos do selo e detalhes', () => {
         info({ type: 'p2p', local: 'host', remote: 'host', relayProtocol: null, ipv6: true }),
       ),
     ).toContain('IPv6');
+  });
+});
+
+describe('roleta no estado da sala', () => {
+  const roulette = { ownerId: ID_B, entries: ['Ana'], teams: [[], []], spin: null, last: null };
+
+  it('vem no joined, é atualizada por roulette e fica nula em servidor antigo', () => {
+    const base = { type: 'joined', selfId: ID_A, selfName: 'Eu', reactions: undefined, peers: [] };
+    const joined = run([{ ...base, roulette } as unknown as RoomAction]);
+    expect(joined.roulette).toEqual(roulette);
+    const next = { ...roulette, ownerId: null };
+    const updated = roomReducer(joined, {
+      type: 'roulette',
+      roulette: next,
+    } as unknown as RoomAction);
+    expect(updated.roulette?.ownerId).toBeNull();
+    expect(run([base as unknown as RoomAction]).roulette).toBeNull();
   });
 });

@@ -4,6 +4,8 @@ import {
   type ErrorCode,
   type PeerInfo,
   type ReactionEmoji,
+  type RouletteCommand,
+  type RouletteState,
   type ServerMessage,
   type SignalData,
 } from '@screenshare/shared';
@@ -41,6 +43,8 @@ export interface SignalingEvents {
     /** Emojis de reação desta sala; `undefined` em servidor antigo (usa a lista padrão). */
     reactions: string[] | undefined;
     peers: PeerInfo[];
+    /** `undefined` em servidor antigo (sem roleta). */
+    roulette: RouletteState | undefined;
   };
   'peer-joined': PeerInfo;
   'peer-left': string;
@@ -48,6 +52,7 @@ export interface SignalingEvents {
   'peer-sharing': { id: string; active: boolean };
   'peer-avatar': { id: string; avatar: string | null };
   reaction: { from: string; emoji: ReactionEmoji };
+  roulette: RouletteState;
   /** Erro enviado pelo servidor (ROOM_FULL, NAME_TAKEN, ...). */
   error: { code: ErrorCode; message: string };
   /** A conexão caiu e o cliente vai tentar reconectar sozinho. */
@@ -169,6 +174,10 @@ export class SignalingClient extends TypedEmitter<SignalingEvents> {
     return this.sendWhenConnected({ type: 'avatar', avatar });
   }
 
+  sendRoulette(command: RouletteCommand): boolean {
+    return this.sendWhenConnected({ type: 'roulette', command });
+  }
+
   sendSharing(active: boolean): boolean {
     return this.sendWhenConnected({ type: 'sharing', active });
   }
@@ -242,6 +251,7 @@ export class SignalingClient extends TypedEmitter<SignalingEvents> {
           selfName: message.selfName,
           reactions: message.reactions,
           peers: message.peers,
+          roulette: message.roulette,
         });
         return;
       case 'peer-joined':
@@ -261,6 +271,9 @@ export class SignalingClient extends TypedEmitter<SignalingEvents> {
         return;
       case 'reaction':
         this.emit('reaction', { from: message.from, emoji: message.emoji });
+        return;
+      case 'roulette':
+        this.emit('roulette', message.state);
         return;
       case 'error':
         this.emit('error', { code: message.code, message: message.message });

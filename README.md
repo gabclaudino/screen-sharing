@@ -6,6 +6,7 @@ sala** protegida por uma senha. Custo ~zero e hospedado no seu próprio PC.
 - **Uma pessoa compartilha por vez**; até 6 pessoas na sala.
 - **Foto de perfil:** cada pessoa escolhe uma foto (clicando no próprio ícone na lista de participantes) e todos a veem; sem escolha, aparece a silhueta padrão. As opções ficam em `packages/web/src/lib/profile-photos.ts` e os arquivos em `packages/web/public/fotos/` (fora do git).
 - **Reações:** botões de emoji (😂 🔥 💀 👏 ❤️ 😮) que sobem pela tela de todo mundo.
+- **Roleta de times:** na aba **Roleta**, uma pessoa clica em “Usar a roleta”, digita até 10 nomes e gira. Sai um nome por giro, alternando TIME 1 e TIME 2, e todos veem ao vivo. O giro faz um “tec-tec” (o ícone de alto-falante silencia só para você; fora da aba Roleta não há som). “Liberar roleta” passa a vez; a lista vale até a sala ficar vazia ou o servidor desligar.
 - O servidor só repassa a sinalização: **o vídeo nunca passa por ele**.
 - Conexão direta (P2P) quando possível; **relay TURN** (Cloudflare) para quem está em 4G/5G, empresa
   ou faculdade.
@@ -67,6 +68,13 @@ Isso sobe dois servidores:
 
 Use o `:5173` enquanto edita. O `:3000` serve a pasta `packages/web/dist`, que só muda com
 `npm run build`.
+
+Para testar sem usar o seu `.env` nem encostar no servidor ligado, há um ambiente isolado em
+`http://localhost:5199` (senha de teste dentro do próprio script):
+
+```powershell
+node scripts/dev-preview.mjs
+```
 
 Em `localhost` o navegador libera o compartilhamento de tela mesmo sem HTTPS. **Em outros
 endereços (por exemplo `http://192.168.0.10:3000` no celular) ele não libera**: para testar com
@@ -380,6 +388,7 @@ Faça depois de publicar. Os itens com 📱 precisam de um segundo dispositivo.
 - [ ] Áudio do sistema ligado, com a call do Discord configurada pelo guia: quem assiste **não** ouve a
       própria voz.
 - [ ] 4 pessoas: um compartilha, e ao parar, outro assume a vez.
+- [ ] Roleta com 2 abas: só quem assumiu consegue mexer; o giro e os times aparecem iguais nas duas.
 
 ## 10. Solução de problemas
 

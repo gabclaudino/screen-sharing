@@ -1022,3 +1022,310 @@ dialog.avatar-picker h2 {
   border-color: #4c8dff;
   background: rgba(76, 141, 255, 0.15);
 }
+
+/* ---------- Abas da sala ---------- */
+
+.tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0.35rem 0.9rem;
+}
+
+.tabs button[aria-current='page'] {
+  border-color: var(--accent);
+  background: rgba(76, 141, 255, 0.18);
+}
+
+.tab-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+/* ---------- Roleta ---------- */
+
+.stage[hidden] {
+  display: none;
+}
+
+.stage-roulette {
+  overflow: auto;
+  /* Os tamanhos da roleta seguem o espaço do palco, não o da janela. */
+  container-type: size;
+}
+
+.roulette {
+  min-height: 100%;
+  display: grid;
+  grid-template-columns: minmax(200px, 260px) minmax(240px, 1fr) minmax(180px, 240px);
+  align-items: start;
+  gap: 20px;
+}
+
+.roulette p {
+  margin: 0;
+}
+
+.roulette-names,
+.roulette-center,
+.roulette-teams {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.roulette-center {
+  position: relative;
+  align-items: center;
+  text-align: center;
+}
+
+/* No canto, por cima do vazio ao lado do círculo: não toma altura da roleta. */
+.roulette-sound {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 1;
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
+
+.roulette-sound svg {
+  display: block;
+}
+
+.roulette-owner {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.roulette-form {
+  display: flex;
+  gap: 6px;
+}
+
+.roulette-form input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Duas colunas quando cabe: os 10 nomes aparecem sem rolar. */
+.roulette-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 4px;
+}
+
+.roulette-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px 4px 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+
+.roulette-remove {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  line-height: 1;
+}
+
+.wheel {
+  position: relative;
+  width: min(100%, 440px, max(220px, 100cqh - 140px));
+}
+
+.wheel svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* A origem da rotação é o centro da roleta (0,0 do viewBox). */
+.wheel g {
+  transform-origin: 0 0;
+}
+
+.wheel-rim {
+  fill: var(--panel-2);
+  stroke: var(--border);
+}
+
+.wheel-empty {
+  fill: var(--panel);
+  stroke: var(--border);
+  stroke-dasharray: 4 4;
+}
+
+.wheel-slice {
+  stroke: var(--bg);
+  stroke-width: 1;
+}
+
+/* Roleta parada: destaca a fatia sorteada. */
+.wheel-dim {
+  opacity: 0.35;
+}
+
+.wheel-label {
+  fill: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: central;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.45);
+  stroke-width: 2px;
+}
+
+.wheel-hub {
+  fill: var(--text);
+  stroke: var(--bg);
+  stroke-width: 2;
+}
+
+.wheel-pointer {
+  fill: var(--text);
+  stroke: var(--bg);
+  stroke-width: 1.5;
+}
+
+.wheel-hint {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  padding: 0 18%;
+  color: var(--muted);
+}
+
+/* Altura reservada: o resultado aparecer não empurra os botões. */
+.roulette-result {
+  min-height: 1.6em;
+  font-size: 1.1rem;
+}
+
+.roulette-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.roulette-spin {
+  min-width: 110px;
+  font-weight: 700;
+}
+
+.team {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--accent);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.team-2 {
+  border-top-color: var(--danger);
+}
+
+.team h2 {
+  color: var(--text);
+}
+
+.team ol {
+  margin: 6px 0 0;
+  padding-left: 1.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+
+.team-empty {
+  color: var(--muted);
+}
+
+/* Janela estreita: roleta em cima, nomes e times embaixo. */
+@container (max-width: 720px) {
+  .roulette {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .roulette-center {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  .wheel {
+    width: min(100%, 360px);
+  }
+}
+
+/* Celular: tudo em uma coluna, com os dois times lado a lado. */
+@container (max-width: 480px) {
+  .roulette-names,
+  .roulette-teams {
+    grid-column: 1 / -1;
+  }
+
+  .roulette-teams {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 760px) {
+  .room-header {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  /* As abas ganham a própria linha embaixo do título. */
+  .tabs {
+    order: 1;
+    flex-basis: 100%;
+  }
+
+  .tabs button {
+    flex: 1;
+    justify-content: center;
+  }
+
+  /* Na roleta o palco usa o espaço dos participantes. */
+  .room-roulette {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'header'
+      'stage'
+      'footer';
+  }
+
+  .room-roulette .sidebar {
+    display: none;
+  }
+
+  .room-roulette .stage {
+    overflow: auto;
+  }
+}

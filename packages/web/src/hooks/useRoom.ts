@@ -1,4 +1,4 @@
-import type { ReactionEmoji } from '@screenshare/shared';
+import type { ReactionEmoji, RouletteCommand } from '@screenshare/shared';
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 import { isSessionValid, type Session } from '../lib/auth';
 import { IceServerStore } from '../lib/ice';
@@ -22,6 +22,8 @@ export interface UseRoomResult {
   setMaxBitrate: (bitsPerSecond: number) => void;
   /** Manda a reação a todos; `false` se não estiver conectado. */
   sendReaction: (emoji: ReactionEmoji) => boolean;
+  /** Comando da roleta; o resultado volta em `state.roulette`. */
+  sendRoulette: (command: RouletteCommand) => void;
 }
 
 const DEFAULT_BITRATE = 2_500_000;
@@ -86,10 +88,10 @@ export function useRoom({
 
     const off = [
       client.on('status', (phase) => dispatch({ type: 'phase', phase })),
-      client.on('joined', ({ selfId, selfName, reactions, peers }) => {
+      client.on('joined', ({ selfId, selfName, reactions, peers, roulette }) => {
         // selfId novo (primeira vez ou reconexão): todas as conexões P2P são refeitas.
         manager.setSelf(selfId, peers);
-        dispatch({ type: 'joined', selfId, selfName, reactions, peers });
+        dispatch({ type: 'joined', selfId, selfName, reactions, peers, roulette });
       }),
       client.on('peer-joined', (peer) => {
         manager.addPeer(peer);
@@ -104,6 +106,7 @@ export function useRoom({
         dispatch({ type: 'peer-avatar', id, avatar: peerAvatar }),
       ),
       client.on('reaction', ({ from, emoji }) => onReactionRef.current?.(from, emoji)),
+      client.on('roulette', (roulette) => dispatch({ type: 'roulette', roulette })),
       client.on('signal', ({ from, data }) => manager.handleSignal(from, data)),
       client.on('error', ({ code }) =>
         // SHARE_BUSY não encerra nada: só avisa a UI para parar a captura local.
@@ -159,5 +162,9 @@ export function useRoom({
     [],
   );
 
-  return { state, setLocalStream, setMaxBitrate, sendReaction };
+  const sendRoulette = useCallback((command: RouletteCommand) => {
+    clientRef.current?.sendRoulette(command);
+  }, []);
+
+  return { state, setLocalStream, setMaxBitrate, sendReaction, sendRoulette };
 }

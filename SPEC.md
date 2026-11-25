@@ -104,6 +104,7 @@ Validação de campos: `name` tem 1–30 chars após `trim`, sem caracteres de c
 | `sharing` | `active: boolean` | Informa que começou/parou de compartilhar |
 | `avatar` | `avatar: string \| null` | Troca (id) ou remove (`null`) a própria foto de perfil. O id é de uma foto pré-definida no cliente (`^[a-z0-9][a-z0-9_-]{0,31}$`); URL ou texto livre é mensagem inválida (1008) |
 | `reaction` | `emoji` | Reação rápida; `emoji` é um único emoji (texto é mensagem inválida → 1008); se não estiver na lista `REACTION_EMOJIS` do servidor (padrão 😂 🔥 💀 👏 ❤️ 😮) é descartado em silêncio. Limite de 5 por segundo por pessoa (o excesso é descartado sem erro) |
+| `roulette` | `command` | Roleta de times: `{action: 'claim' \| 'release' \| 'spin'}`, `{action: 'add' \| 'remove', name}` ou `{action: 'reset', clear}`. Só quem assumiu (`claim`) mexe; pedidos que não valem (outra pessoa no controle, durante o giro, nome repetido, mais de 10 jogadores) são ignorados. `add` aplica `NAME_ALIASES`. Limite de 20 por segundo por pessoa |
 | `ping` | — | Heartbeat |
 | `leave` | — | Sai da sala |
 
@@ -119,6 +120,7 @@ Validação de campos: `name` tem 1–30 chars após `trim`, sem caracteres de c
 | `peer-avatar` | `id`, `avatar: string \| null` | Um peer trocou ou removeu a foto de perfil (não volta para quem trocou). `peers` e `peer-joined` também trazem `avatar?` (ausente = sem foto) |
 | `reaction` | `from`, `emoji` | Reação de outra pessoa (não volta para quem enviou) |
 | `error` | `code`, `message` | `ROOM_FULL`, `NAME_TAKEN`, `ALREADY_JOINED`, `SHARE_BUSY`, `RATE_LIMITED`, `INVALID` |
+| `roulette` | `state: {ownerId, entries, teams, spin, last}` | Estado da roleta, enviado a todos a cada mudança (`joined` também o traz em `roulette?`). O servidor sorteia: `spin` = `{seq, index, ms}` diz onde a roleta vai parar e quanto falta; só depois (5 s) o sorteado sai de `entries` e entra no time, alternando TIME 1 e TIME 2. Se o dono sai, o controle fica livre e a lista é mantida (a reconexão do mesmo login que substitui a antiga mantém o controle); com a sala vazia, zera |
 | `pong` | — | Resposta ao heartbeat |
 
 Regras:
@@ -212,6 +214,7 @@ Telas:
    - Se ninguém compartilha: estado vazio com a lista de participantes.
    - Barra de controles: **Compartilhar / Parar**, seletor de qualidade (bitrate), toggle "compartilhar áudio do sistema" (**desligado por padrão**, com aviso sobre eco quando há call de voz; guia exibido em janela no próprio app e em `docs/audio-discord.md`). O botão **Sair** fica no canto superior direito do cabeçalho: vermelho, com ícone de saída, e o hover inverte as cores (fundo branco, texto/ícone vermelhos). Não há botão de copiar link. Na transmissão de quem assiste: ícone de **tela cheia / sair da tela cheia** dentro do tile e, com o clique direito, menu com **Silenciar** e **volume** arrastável (lembrado entre visitas).
    - Lista de participantes com nome e badge de conexão (P2P / relay / conectando / falhou).
+   - Abas **Tela** e **Roleta** no cabeçalho (ponto verde quando alguém controla a roleta). Na Roleta: campo de nomes (só para quem controla), roleta animada, botões Girar / Sortear de novo / Limpar tudo / Liberar roleta e as listas TIME 1 e TIME 2 (5 vagas cada). Trocar de aba não interrompe o vídeo; na aba Roleta os controles de compartilhamento só aparecem para quem está transmitindo. O giro toca um tec a cada divisa que passa pelo ponteiro (Web Audio, sem arquivo; no máximo um a cada 45 ms), só com a aba aberta e o som ligado (botão por pessoa, lembrado no navegador; aviso para quem transmite com áudio).
 3. Erros claros: senha errada, sala cheia, nome em uso, sessão expirada, permissão de captura negada, navegador sem suporte a `getDisplayMedia`.
 
 **Navegadores suportados (v1):** Chrome e Edge recentes (desktop) são o alvo principal; Firefox e Safari desktop recentes funcionam para compartilhar vídeo, mas **áudio do sistema só é capturado no Chrome/Edge** (Windows/ChromeOS; no macOS/Linux só áudio de aba). A UI desabilita/avisa o toggle de áudio quando não suportado. Mobile apenas assiste.

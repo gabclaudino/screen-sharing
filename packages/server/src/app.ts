@@ -30,6 +30,8 @@ export interface AppOptions {
   maxConnectionsPerSession?: number;
   maxConnections?: number;
   joinTimeoutMs?: number;
+  /** Duração do giro da roleta (testes). */
+  rouletteSpinMs?: number;
   /** Identifica esta execução do servidor (padrão: aleatório); só os testes fixam. */
   bootId?: string;
 }
@@ -88,6 +90,7 @@ export function createApp(config: Config, options: AppOptions = {}) {
       ? {}
       : { maxConnectionsPerSession: options.maxConnectionsPerSession }),
     ...(options.maxConnections === undefined ? {} : { maxConnections: options.maxConnections }),
+    ...(options.rouletteSpinMs === undefined ? {} : { rouletteSpinMs: options.rouletteSpinMs }),
     ...(options.joinTimeoutMs === undefined ? {} : { joinTimeoutMs: options.joinTimeoutMs }),
   });
   const iceService = new IceService(createIceProvider(config.ice, options.fetchImpl), {

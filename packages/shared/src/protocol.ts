@@ -105,6 +105,56 @@ export const signalDataSchema = z
 export type SignalData = z.infer<typeof signalDataSchema>;
 
 // ---------------------------------------------------------------------------
+// Roleta (sorteio de times)
+// ---------------------------------------------------------------------------
+
+/** Dois times de cinco: nomes na roleta + já sorteados. */
+export const ROULETTE_MAX_NAMES = 10;
+/** Duração do giro; o servidor só publica o resultado depois dela. */
+export const ROULETTE_SPIN_MS = 5_000;
+
+const rouletteTeamSchema = z.array(nameSchema).max(ROULETTE_MAX_NAMES / 2);
+
+export const rouletteStateSchema = z.strictObject({
+  // Quem controla a roleta; `null` = livre.
+  ownerId: peerIdSchema.nullable(),
+  // Nomes que ainda estão na roleta, na ordem das fatias.
+  entries: z.array(nameSchema).max(ROULETTE_MAX_NAMES),
+  // [TIME 1, TIME 2], na ordem do sorteio.
+  teams: z.tuple([rouletteTeamSchema, rouletteTeamSchema]),
+  // Giro em andamento: `index` é a fatia (em `entries`) onde a roleta vai parar.
+  spin: z
+    .strictObject({
+      seq: z.number().int().min(1),
+      index: z
+        .number()
+        .int()
+        .min(0)
+        .max(ROULETTE_MAX_NAMES - 1),
+      // Quanto falta para o resultado (menor que o total para quem entra no meio do giro).
+      ms: z.number().int().min(0).max(ROULETTE_SPIN_MS),
+    })
+    .nullable(),
+  // Último sorteado (0 = TIME 1, 1 = TIME 2); `null` antes do primeiro ou depois de recomeçar.
+  last: z
+    .strictObject({ name: nameSchema, team: z.union([z.literal(0), z.literal(1)]) })
+    .nullable(),
+});
+export type RouletteState = z.infer<typeof rouletteStateSchema>;
+
+/** Só quem controla a roleta pode usar os comandos além de `claim`. */
+export const rouletteCommandSchema = z.discriminatedUnion('action', [
+  z.strictObject({ action: z.literal('claim') }),
+  z.strictObject({ action: z.literal('release') }),
+  z.strictObject({ action: z.literal('add'), name: nameSchema }),
+  z.strictObject({ action: z.literal('remove'), name: nameSchema }),
+  z.strictObject({ action: z.literal('spin') }),
+  // `clear: false` devolve todos à roleta; `true` apaga a lista.
+  z.strictObject({ action: z.literal('reset'), clear: z.boolean() }),
+]);
+export type RouletteCommand = z.infer<typeof rouletteCommandSchema>;
+
+// ---------------------------------------------------------------------------
 // Cliente → Servidor
 // ---------------------------------------------------------------------------
 
@@ -147,6 +197,11 @@ export const reactionToServerSchema = z.strictObject({
   emoji: reactionEmojiSchema,
 });
 
+export const rouletteToServerSchema = z.strictObject({
+  type: z.literal('roulette'),
+  command: rouletteCommandSchema,
+});
+
 export const pingMessageSchema = z.strictObject({ type: z.literal('ping') });
 export const leaveMessageSchema = z.strictObject({ type: z.literal('leave') });
 
@@ -156,6 +211,7 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
   sharingMessageSchema,
   avatarMessageSchema,
   reactionToServerSchema,
+  rouletteToServerSchema,
   pingMessageSchema,
   leaveMessageSchema,
 ]);
@@ -186,6 +242,8 @@ export const joinedMessageSchema = z.strictObject({
   // Reações em uso nesta sala (REACTION_EMOJIS do servidor). Opcional: servidor antigo não envia.
   reactions: z.array(reactionEmojiSchema).max(MAX_REACTION_EMOJIS).optional(),
   peers: z.array(peerInfoSchema),
+  // Roleta como está agora. Opcional: servidor antigo não envia (a aba some).
+  roulette: rouletteStateSchema.optional(),
 });
 
 export const peerJoinedMessageSchema = z.strictObject({
@@ -222,6 +280,11 @@ export const reactionToClientSchema = z.strictObject({
   emoji: reactionEmojiSchema,
 });
 
+export const rouletteToClientSchema = z.strictObject({
+  type: z.literal('roulette'),
+  state: rouletteStateSchema,
+});
+
 export const errorMessageSchema = z.strictObject({
   type: z.literal('error'),
   code: errorCodeSchema,
@@ -238,6 +301,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   peerSharingMessageSchema,
   peerAvatarMessageSchema,
   reactionToClientSchema,
+  rouletteToClientSchema,
   errorMessageSchema,
   pongMessageSchema,
 ]);

@@ -1122,3 +1122,98 @@ describe('servidor (limites e heartbeat)', () => {
     }
   });
 });
+
+describe('roleta (WebSocket)', () => {
+  let running: Running;
+
+  beforeEach(async () => {
+    running = await startApp({ NAME_ALIASES: '{"fulano":"Apelido"}' }, { rouletteSpinMs: 50 });
+  });
+  afterEach(async () => {
+    await running.app.close();
+  });
+
+  async function rouletteState(client: TestClient) {
+    const message = await client.next();
+    if (message.type !== 'roulette') throw new Error(`esperava roulette, veio ${message.type}`);
+    return message.state;
+  }
+
+  it('todos veem o controle, os nomes e o sorteio; quem não controla é ignorado', async () => {
+    const a = await TestClient.connect(running, await getToken(running));
+    const b = await TestClient.connect(running, await getToken(running));
+    const joinedA = await a.join('Ana');
+    expect(joinedA.roulette).toMatchObject({ ownerId: null, entries: [] });
+    await b.join('Bia');
+    await a.next(); // peer-joined
+
+    const roulette = (command: object) => ({ type: 'roulette', command });
+    a.send(roulette({ action: 'claim' }));
+    expect((await rouletteState(a)).ownerId).toBe(joinedA.selfId);
+    expect((await rouletteState(b)).ownerId).toBe(joinedA.selfId);
+
+    b.send(roulette({ action: 'claim' }));
+    b.send(roulette({ action: 'add', name: 'Intruso' }));
+    await a.expectSilence();
+
+    // Os apelidos configurados também valem na roleta.
+    a.send(roulette({ action: 'add', name: 'fulano' }));
+    expect((await rouletteState(a)).entries).toEqual(['Apelido']);
+    expect((await rouletteState(b)).entries).toEqual(['Apelido']);
+
+    a.send(roulette({ action: 'spin' }));
+    expect((await rouletteState(b)).spin).toMatchObject({ seq: 1, index: 0 });
+    expect(await rouletteState(b)).toMatchObject({
+      entries: [],
+      teams: [['Apelido'], []],
+      spin: null,
+      last: { name: 'Apelido', team: 0 },
+    });
+
+    // O dono sai: a roleta fica livre, com o resultado preservado.
+    a.close();
+    expect(await b.next()).toMatchObject({ type: 'peer-left' });
+    expect(await rouletteState(b)).toMatchObject({ ownerId: null, teams: [['Apelido'], []] });
+
+    // Quem chega depois recebe o estado atual.
+    const c = await TestClient.connect(running, await getToken(running));
+    expect((await c.join('Caio')).roulette?.teams).toEqual([['Apelido'], []]);
+    b.close();
+    c.close();
+  });
+
+  it('reconexão do mesmo login mantém o controle; sala vazia zera a roleta', async () => {
+    const token = await getToken(running);
+    const observer = await TestClient.connect(running, await getToken(running));
+    await observer.join('Bia');
+    const first = await TestClient.connect(running, token);
+    await first.join('Ana');
+    await observer.next(); // peer-joined
+    first.send({ type: 'roulette', command: { action: 'claim' } });
+    await rouletteState(observer);
+
+    const second = await TestClient.connect(running, token);
+    const joined = await second.join('Ana');
+    expect(joined.roulette?.ownerId).toBe(joined.selfId);
+    await observer.next(); // peer-left
+    await observer.next(); // peer-joined
+    expect((await rouletteState(observer)).ownerId).toBe(joined.selfId);
+
+    second.close();
+    observer.close();
+    await Promise.all([second.closed, observer.closed]);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const later = await TestClient.connect(running, await getToken(running));
+    expect((await later.join('Duda')).roulette).toMatchObject({ ownerId: null, entries: [] });
+    later.close();
+  });
+
+  it('roulette antes do join → INVALID; comando desconhecido fecha a conexão (1008)', async () => {
+    const a = await TestClient.connect(running, await getToken(running));
+    a.send({ type: 'roulette', command: { action: 'claim' } });
+    expect(await a.next()).toMatchObject({ type: 'error', code: 'INVALID' });
+    await a.join('Ana');
+    a.send({ type: 'roulette', command: { action: 'escolher', name: 'Ana' } });
+    expect((await a.closed).code).toBe(1008);
+  });
+});

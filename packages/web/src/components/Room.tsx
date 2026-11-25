@@ -29,6 +29,7 @@ import { Controls } from './Controls';
 import { DontClickButton } from './DontClickButton';
 import { ReactionBar } from './ReactionBar';
 import { ReactionOverlay } from './ReactionOverlay';
+import { RoulettePanel } from './RoulettePanel';
 import { VideoTile } from './VideoTile';
 
 interface Props {
@@ -65,7 +66,7 @@ export function Room({ name, session, onLeave }: Props) {
     [addFloater],
   );
 
-  const { state, setLocalStream, setMaxBitrate, sendReaction } = useRoom({
+  const { state, setLocalStream, setMaxBitrate, sendReaction, sendRoulette } = useRoom({
     name,
     session,
     avatar,
@@ -95,6 +96,7 @@ export function Room({ name, session, onLeave }: Props) {
   const [shareNote, setShareNote] = useState<string | null>(null);
   const [guideOpen, setGuideOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [tab, setTab] = useState<'screen' | 'roulette'>('screen');
 
   useEffect(() => setMaxBitrate(bitrate), [bitrate, setMaxBitrate]);
 
@@ -146,11 +148,42 @@ export function Room({ name, session, onLeave }: Props) {
   // Uma pessoa por vez: enquanto outra transmite, o botão fica bloqueado com o nome dela.
   const blockedBy = share.sharing ? null : (peers.find((peer) => peer.sharing)?.name ?? null);
   const stuckConnecting = state.phase === 'reconnecting' && !state.everJoined;
+  // Servidor antigo não manda a roleta: sem abas.
+  const roulette = state.roulette;
+  const rouletteOpen = roulette !== null && tab === 'roulette';
+  const rouletteOwner =
+    roulette?.ownerId == null
+      ? null
+      : roulette.ownerId === state.selfId
+        ? myName
+        : (state.peers[roulette.ownerId]?.name ?? null);
 
   return (
-    <div className="room">
+    <div className={rouletteOpen ? 'room room-roulette' : 'room'}>
       <header className="room-header">
         <h1>Tela dos Guri</h1>
+        {roulette ? (
+          <nav className="tabs" aria-label="Abas da sala">
+            <button
+              type="button"
+              aria-current={rouletteOpen ? undefined : 'page'}
+              onClick={() => setTab('screen')}
+            >
+              Tela
+            </button>
+            <button
+              type="button"
+              aria-current={rouletteOpen ? 'page' : undefined}
+              title={rouletteOwner ? `${rouletteOwner} está usando a roleta` : undefined}
+              onClick={() => setTab('roulette')}
+            >
+              Roleta
+              {roulette.ownerId !== null ? (
+                <span className="tab-dot" role="img" aria-label="em uso" />
+              ) : null}
+            </button>
+          </nav>
+        ) : null}
         {state.phase !== 'connected' ? (
           <p className="banner" role="status">
             {state.everJoined
@@ -178,7 +211,22 @@ export function Room({ name, session, onLeave }: Props) {
         </button>
       </header>
 
-      <main className="stage">
+      {/* As duas abas ficam montadas: o vídeo continua tocando e o giro não recomeça. */}
+      {roulette ? (
+        <main className="stage stage-roulette" hidden={!rouletteOpen}>
+          <RoulettePanel
+            roulette={roulette}
+            selfId={state.selfId}
+            ownerName={rouletteOwner}
+            disabled={state.phase !== 'connected'}
+            onCommand={sendRoulette}
+            visible={rouletteOpen}
+            sharingAudio={(share.stream?.getAudioTracks().length ?? 0) > 0}
+          />
+        </main>
+      ) : null}
+
+      <main className="stage" hidden={rouletteOpen}>
         {showGrid ? (
           <div className="grid">
             {showLocalTile ? <VideoTile stream={share.stream} label={myName} local /> : null}
@@ -271,7 +319,9 @@ export function Room({ name, session, onLeave }: Props) {
             empresa, faculdade) podem falhar; entre redes comuns continua funcionando.
           </p>
         ) : null}
-        {share.supported ? (
+        {/* Na roleta os controles de compartilhamento saem para dar altura, a menos que se esteja
+            transmitindo (o botão de parar precisa continuar à mão). */}
+        {share.supported && (!rouletteOpen || share.sharing) ? (
           <>
             {share.error ? (
               <p className="error" role="alert">

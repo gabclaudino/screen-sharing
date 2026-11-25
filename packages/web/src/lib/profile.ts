@@ -89,6 +89,25 @@ export function markAudioGuideSeen(storage = defaultStorage()): void {
   }
 }
 
+const EFFECTS_MUTED_KEY = 'screenshare.effectsMuted';
+
+/** Efeitos sonoros do app silenciados por esta pessoa. */
+export function loadEffectsMuted(storage = defaultStorage()): boolean {
+  try {
+    return storage?.getItem(EFFECTS_MUTED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function saveEffectsMuted(muted: boolean, storage = defaultStorage()): void {
+  try {
+    storage?.setItem(EFFECTS_MUTED_KEY, muted ? '1' : '0');
+  } catch {
+    // sem storage: o ajuste só não é lembrado na próxima visita
+  }
+}
+
 const AVATAR_KEY = 'screenshare.avatar';
 
 /** Foto de perfil escolhida (só o id), lembrada entre visitas; `null` = sem foto. */

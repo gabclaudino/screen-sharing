@@ -1,4 +1,4 @@
-import type { ErrorCode, PeerInfo } from '@screenshare/shared';
+import type { ErrorCode, PeerInfo, RouletteState } from '@screenshare/shared';
 import type { ConnectionInfo, PeerStatus } from './peer-link';
 import type { CloseReason, SignalingStatus } from './signaling-client';
 
@@ -22,6 +22,8 @@ export interface RoomState {
   selfName: string | null;
   /** Emojis dos botões de reação, como o servidor configurou; `null` = lista padrão. */
   reactions: string[] | null;
+  /** Roleta da sala; `null` = ainda sem estado (ou servidor sem roleta). */
+  roulette: RouletteState | null;
   peers: Record<string, PeerView>;
   /** true depois do primeiro `joined`; distingue "conectando pela 1ª vez" de "reconectando". */
   everJoined: boolean;
@@ -42,7 +44,9 @@ export type RoomAction =
       selfName: string | undefined;
       reactions: string[] | undefined;
       peers: PeerInfo[];
+      roulette?: RouletteState | undefined;
     }
+  | { type: 'roulette'; roulette: RouletteState }
   | { type: 'peer-joined'; peer: PeerInfo }
   | { type: 'peer-left'; id: string }
   | { type: 'peer-sharing'; id: string; active: boolean }
@@ -60,6 +64,7 @@ export const createInitialRoomState = (): RoomState => ({
   selfId: null,
   selfName: null,
   reactions: null,
+  roulette: null,
   peers: {},
   everJoined: false,
   iceFallback: false,
@@ -96,10 +101,13 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
         selfId: action.selfId,
         selfName: action.selfName ?? null,
         reactions: action.reactions ?? null,
+        roulette: action.roulette ?? null,
         everJoined: true,
         lastError: null,
         peers: Object.fromEntries(action.peers.map((peer) => [peer.id, toView(peer)])),
       };
+    case 'roulette':
+      return { ...state, roulette: action.roulette };
     case 'peer-joined':
       return { ...state, peers: { ...state.peers, [action.peer.id]: toView(action.peer) } };
     case 'peer-left': {
