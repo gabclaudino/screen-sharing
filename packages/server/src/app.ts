@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
-import { loginRequestSchema, MAX_WS_MESSAGE_BYTES, type LoginResponse } from '@screenshare/shared';
+import {
+  connectionReportSchema,
+  loginRequestSchema,
+  MAX_WS_MESSAGE_BYTES,
+  type LoginResponse,
+} from '@screenshare/shared';
 import { WebSocketServer } from 'ws';
 import type { Config } from './config';
 import { silentLogger, type Logger } from './logger';
@@ -37,6 +42,9 @@ export interface AppOptions {
 }
 
 const MAX_LOGIN_BODY_BYTES = 1024;
+const MAX_REPORT_BODY_BYTES = 2048;
+// Relatos de conexão por login e por minuto (sala cheia reconectando várias vezes cabe com folga).
+const REPORTS_PER_MINUTE = 120;
 
 class PayloadTooLargeError extends Error {}
 
@@ -99,7 +107,11 @@ export function createApp(config: Config, options: AppOptions = {}) {
   });
   const serveStatic = createStaticHandler(config.staticDir);
   const loginLimiter = new RateLimiter(config.loginRateMax, config.loginRateWindowMs);
-  const sweeper = setInterval(() => loginLimiter.sweep(), 60_000);
+  const reportLimiter = new RateLimiter(REPORTS_PER_MINUTE, 60_000);
+  const sweeper = setInterval(() => {
+    loginLimiter.sweep();
+    reportLimiter.sweep();
+  }, 60_000);
   sweeper.unref();
 
   const wss = new WebSocketServer({
@@ -181,6 +193,56 @@ export function createApp(config: Config, options: AppOptions = {}) {
     sendJson(res, 200, { ok: true });
   }
 
+  // Diagnóstico das conexões entre navegadores: vira uma linha `webrtc` no log, com os nomes.
+  async function handleReport(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const header = req.headers.authorization;
+    const token = header?.startsWith('Bearer ') ? header.slice(7).trim() : '';
+    const session = token ? verifyToken(token, signingSecret) : null;
+    if (!session) {
+      sendJson(res, 401, { error: 'UNAUTHORIZED' });
+      return;
+    }
+    if (!reportLimiter.hit(session.sid)) {
+      sendJson(res, 429, { error: 'RATE_LIMITED' });
+      return;
+    }
+    let body: unknown;
+    try {
+      body = JSON.parse(await readBody(req, MAX_REPORT_BODY_BYTES));
+    } catch (error) {
+      if (error instanceof PayloadTooLargeError) {
+        res.setHeader('Connection', 'close');
+        res.once('finish', () => req.destroy());
+        sendJson(res, 413, { error: 'PAYLOAD_TOO_LARGE' });
+      } else {
+        sendJson(res, 400, { error: 'INVALID' });
+      }
+      return;
+    }
+    const parsed = connectionReportSchema.safeParse(body);
+    if (!parsed.success) {
+      sendJson(res, 400, { error: 'INVALID' });
+      return;
+    }
+    const { self, peer, event, ...details } = parsed.data;
+    const from = signaling.identify(self);
+    // Cada login só relata as próprias conexões.
+    if (!from || from.sid !== session.sid) {
+      sendJson(res, 403, { error: 'FORBIDDEN' });
+      return;
+    }
+    logger[event === 'connected' ? 'info' : 'warn']('webrtc', {
+      state: event,
+      from: from.name,
+      to: signaling.identify(peer)?.name ?? '?',
+      self,
+      peer,
+      ...details,
+    });
+    res.writeHead(204, { 'Cache-Control': 'no-store' });
+    res.end();
+  }
+
   async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     applySecurityHeaders(res, config);
     const { pathname } = new URL(req.url ?? '/', 'http://localhost');
@@ -210,6 +272,15 @@ export function createApp(config: Config, options: AppOptions = {}) {
         return;
       }
       handleSession(req, res);
+      return;
+    }
+    if (pathname === '/api/report') {
+      if (req.method !== 'POST') {
+        res.setHeader('Allow', 'POST');
+        sendJson(res, 405, { error: 'METHOD_NOT_ALLOWED' });
+        return;
+      }
+      await handleReport(req, res);
       return;
     }
     // Rotas /api/* desconhecidas nunca caem no fallback SPA.

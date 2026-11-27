@@ -33,7 +33,12 @@ function fakeContext(state: 'running' | 'suspended' = 'running') {
 describe('playTicks', () => {
   it('agenda um som em cada momento e silencia/devolve pela saída', () => {
     const fake = fakeContext();
-    const player = playTicks([100, 600], true, () => fake.context);
+    const player = playTicks(
+      [100, 600],
+      true,
+      () => fake.context,
+      () => 0,
+    );
     expect(fake.starts).toEqual([10.1, 10.6]);
     expect(fake.gains[0]?.value).toBe(1);
     player.setAudible(false);

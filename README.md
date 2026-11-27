@@ -431,6 +431,38 @@ onde** a conexão passa (nosso lado e o do outro, IPv6, e o protocolo do relay).
   Em `chrome://webrtc-internals`, no PC de quem compartilha, o bloco `outbound-rtp` mostra
   `qualityLimitationReason` (`cpu` ou `bandwidth`), a resolução real e o bitrate alcançado.
 
+### Alguém fica em “conectando”
+
+O vídeo vai direto entre os navegadores (ou pelo TURN). Cada navegador relata ao servidor como foi cada
+conexão, e isso vira uma linha `webrtc` em `logs\server.log`, com `from` (quem relata) e `to`. Para ver só
+essas linhas:
+
+```powershell
+Select-String -Path logs\server.log -Pattern '"event":"webrtc"' | Select-Object -Last 40 | ForEach-Object Line
+```
+
+| `state`        | Significado                                              |
+| -------------- | -------------------------------------------------------- |
+| `connected`    | Conectou; `path` diz se é direto (`p2p`) ou `relay`.     |
+| `slow`         | Continua sem conectar aos 15 s ou 60 s (`ms`).           |
+| `timeout`      | Não conectou no prazo (20 a 70 s); o app tenta de novo.  |
+| `failed`       | O navegador desistiu dessa tentativa (uma nova é feita). |
+| `disconnected` | A conexão caiu depois de começar.                        |
+| `abandoned`    | Desfeita sem nunca ter funcionado (F5 ou saída).         |
+| `error`        | Erro na negociação (`error` traz o nome).                |
+
+O app recria sozinho a tentativa que não conecta no prazo; F5 continua valendo para quem não quiser esperar.
+
+Como ler uma linha com problema:
+
+- `remoteDescription: false`: a resposta do outro lado não chegou.
+- `sent` zerado: este navegador não conseguiu gerar endereços (extensão, VPN ou bloqueio de WebRTC).
+- `received` zerado: os endereços do outro lado não chegaram.
+- `sent.relay: 0` com `turn: true`: não alcançou o TURN (firewall ou antivírus); veja `iceErrors`.
+- `turn: false`: este navegador entrou sem servidor TURN.
+
+---
+
 ## 11. Segurança
 
 - A **senha de acesso** é a única barreira: escolha uma forte e compartilhe só com os amigos. Para

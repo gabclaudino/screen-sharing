@@ -1,4 +1,8 @@
-import type { SignalData } from '@screenshare/shared';
+import {
+  connectionReportSchema,
+  type ConnectionReport,
+  type SignalData,
+} from '@screenshare/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePeerConnection, FakeStream } from './fake-webrtc';
 import { PeerManager, type ConnectionInfo, type PeerStatus } from './peer-manager';
@@ -659,5 +663,167 @@ describe('saída de peers e encerramento', () => {
         .getSenders()
         .some((s) => s.track !== null),
     ).toBe(true);
+  });
+});
+
+describe('diagnóstico das conexões', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  const watch = (iceServers: RTCIceServer[] = [], connectTimeoutMs = 0) => {
+    const pcs: FakePeerConnection[] = [];
+    const reports: ConnectionReport[] = [];
+    const mgr = new PeerManager({
+      getIceServers: () => iceServers,
+      statsIntervalMs: 0,
+      connectTimeoutMs,
+      sendSignal: () => true,
+      createPeerConnection: (config) => {
+        const pc = new FakePeerConnection(config);
+        pcs.push(pc);
+        return pc as unknown as RTCPeerConnection;
+      },
+    });
+    mgr.on('report', (report) => reports.push(report));
+    mgr.setSelf(ID_A, [peer(ID_B)]);
+    const pc = pcs[0] as FakePeerConnection;
+    return { mgr, pc, reports };
+  };
+
+  it('relata aos 15 s e 60 s enquanto não conecta, com o que foi trocado', async () => {
+    const { reports } = watch([{ urls: ['turn:turn.example.com:3478'] }]);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(reports.map((r) => [r.event, r.ms])).toEqual([
+      ['slow', 15_000],
+      ['slow', 60_000],
+    ]);
+    expect(reports[0]).toMatchObject({
+      self: ID_A,
+      peer: ID_B,
+      remoteDescription: false,
+      sent: { host: 1 },
+      received: { host: 0 },
+      turn: true,
+    });
+    expect(connectionReportSchema.safeParse(reports[0]).success).toBe(true);
+  });
+
+  it('conectou: relata o caminho uma vez e não acusa lentidão', async () => {
+    const { pc, reports } = watch();
+    pc.setSelectedPair('host', 'relay');
+    pc.setConnectionState('connected');
+    await vi.advanceTimersByTimeAsync(60_000);
+    pc.setConnectionState('connected');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reports.map((r) => r.event)).toEqual(['connected']);
+    expect(reports[0]).toMatchObject({ turn: false, path: { type: 'relay' } });
+    expect(connectionReportSchema.safeParse(reports[0]).success).toBe(true);
+  });
+
+  it('falha é relatada', () => {
+    const { pc, reports } = watch();
+    pc.setConnectionState('failed');
+    expect(reports.map((r) => r.event)).toEqual(['failed']);
+  });
+
+  it('o tempo limite é relatado antes de recriar', async () => {
+    const { reports } = watch([], 20_000);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(reports.map((r) => [r.event, r.gen])).toEqual([
+      ['slow', 0],
+      ['timeout', 0],
+    ]);
+    expect(connectionReportSchema.safeParse(reports[1]).success).toBe(true);
+  });
+
+  it('desfeita sem conectar (F5): relata só depois de 3 s', async () => {
+    const quick = watch();
+    quick.mgr.removePeer(ID_B);
+    expect(quick.reports).toEqual([]);
+
+    const stuck = watch();
+    await vi.advanceTimersByTimeAsync(5_000);
+    stuck.mgr.reportPending();
+    stuck.mgr.removePeer(ID_B);
+    expect(stuck.reports.map((r) => r.event)).toEqual(['abandoned', 'abandoned']);
+  });
+});
+
+describe('tentativa de conexão que não avança', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  // ID_A < ID_B: A é o lado polite (30 s); B age primeiro (20 s).
+  it('recria depois do prazo, com um reset; o prazo cresce a cada tentativa', async () => {
+    const b = makeNode(ID_B, { deliver: false });
+    b.mgr.setSelf(ID_B, [peer(ID_A)]);
+    await vi.advanceTimersByTimeAsync(19_999);
+    expect(b.pcs).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(b.pcs).toHaveLength(2);
+    expect(b.pcs[0]?.closed).toBe(true);
+    expect(b.sent).toContainEqual({ to: ID_A, data: { gen: 1, reset: true } });
+
+    await vi.advanceTimersByTimeAsync(39_999);
+    expect(b.pcs).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(b.pcs).toHaveLength(3);
+    // teto: 3× o prazo inicial
+    await vi.advanceTimersByTimeAsync(60_000 * 2);
+    expect(b.pcs).toHaveLength(5);
+  });
+
+  it('o lado polite espera 10 s a mais', async () => {
+    const a = makeNode(ID_A, { deliver: false });
+    a.mgr.setSelf(ID_A, [peer(ID_B)]);
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(a.pcs).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(a.pcs).toHaveLength(2);
+  });
+
+  it('conectou dentro do prazo: não recria', async () => {
+    const b = makeNode(ID_B, { deliver: false });
+    b.mgr.setSelf(ID_B, [peer(ID_A)]);
+    b.lastPc().setConnectionState('connected');
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(b.pcs).toHaveLength(1);
+  });
+
+  it('negociação perdida: os dois lados passam juntos para a nova tentativa', async () => {
+    // A não recebe nada na primeira tentativa; depois as mensagens passam.
+    const a = makeNode(ID_A, { deliver: false });
+    const b = makeNode(ID_B, { deliver: false });
+    await connectPair(a, b);
+    for (const [from, to] of [
+      [a, b],
+      [b, a],
+    ] as const) {
+      const push = from.sent.push.bind(from.sent);
+      from.sent.push = (...items) => {
+        for (const item of items) queueMicrotask(() => to.mgr.handleSignal(from.id, item.data));
+        return push(...items);
+      };
+    }
+    await vi.advanceTimersByTimeAsync(20_000);
+
+    expect([a.pcs.length, b.pcs.length]).toEqual([2, 2]);
+    for (const node of [a, b]) {
+      expect(node.lastPc().signalingState).toBe('stable');
+      expect(node.lastPc().remoteDescription).not.toBeNull();
+    }
+  });
+
+  it('nova tentativa depois de uma falha que fica parada também é recriada', async () => {
+    const b = makeNode(ID_B, { deliver: false });
+    b.mgr.setSelf(ID_B, [peer(ID_A)]);
+    const pc = b.lastPc();
+    pc.setConnectionState('connected');
+    pc.setConnectionState('failed');
+    pc.setConnectionState('connecting');
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(b.pcs).toHaveLength(2);
   });
 });

@@ -145,7 +145,8 @@ function Invoke-Ligar {
   $pasta = $raiz.Replace("'", "''")
   Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @(
     '-NoProfile', '-WindowStyle', 'Hidden', '-Command',
-    "Set-Location '$pasta'; npm start *>> logs\server.log"
+    # UTF-8 para os nomes com acento saírem certos no log.
+    "try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }; Set-Location '$pasta'; npm start *>> logs\server.log"
   ) | Out-Null
 
   $limite = (Get-Date).AddSeconds(25)

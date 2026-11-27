@@ -50,6 +50,9 @@ const REACTIONS_PER_SEC = 5;
 // Cada comando da roleta é repassado a todos: folga para digitar nomes, sem virar inundação.
 const ROULETTE_COMMANDS_PER_SEC = 20;
 
+// Quantas entradas lembrar (inclusive de quem já saiu) para dar nome aos relatos de conexão.
+const REMEMBERED_PEERS = 100;
+
 const WS_CLOSE_POLICY = 1008;
 const WS_CLOSE_REPLACED = 4001;
 // Servidor desligando: o cliente volta à tela de entrada em vez de ficar tentando reconectar.
@@ -74,6 +77,7 @@ export function createSignaling(options: SignalingOptions) {
   const joinTimeoutMs = options.joinTimeoutMs ?? 15_000;
   const connections = new Set<Connection>();
   const byPeerId = new Map<string, Connection>();
+  const known = new Map<string, { name: string; sid: string }>();
 
   const sendError = (conn: Connection, code: ErrorCode, message: string): void =>
     send(conn.ws, { type: 'error', code, message });
@@ -122,7 +126,7 @@ export function createSignaling(options: SignalingOptions) {
     broadcast(peer.id, { type: 'peer-left', id: peer.id });
     if (room.size === 0) roulette.clear();
     else if (roulette.release(peer.id)) broadcastRoulette();
-    logger.info('leave', { peer: peer.id });
+    logger.info('leave', { peer: peer.id, name: peer.name });
   };
 
   const handleJoin = (conn: Connection, msg: Extract<ClientMessage, { type: 'join' }>): void => {
@@ -163,6 +167,8 @@ export function createSignaling(options: SignalingOptions) {
 
     conn.peerId = peer.id;
     byPeerId.set(peer.id, conn);
+    known.set(peer.id, { name: peer.name, sid: peer.sid });
+    if (known.size > REMEMBERED_PEERS) known.delete(known.keys().next().value as string);
     const handedOver = evicted !== undefined && roulette.handover(evicted.id, peer.id);
     send(conn.ws, {
       type: 'joined',
@@ -176,7 +182,7 @@ export function createSignaling(options: SignalingOptions) {
     if (handedOver) broadcastRoulette(peer.id);
     // Avisa o cliente para parar a captura que ele ainda tem ativa.
     if (shareBusy) sendError(conn, 'SHARE_BUSY', 'Outra pessoa já está compartilhando');
-    logger.info('join', { peer: peer.id });
+    logger.info('join', { peer: peer.id, name: peer.name });
   };
 
   const handleMessage = (conn: Connection, msg: ClientMessage): void => {
@@ -335,5 +341,8 @@ export function createSignaling(options: SignalingOptions) {
     return count < maxPerSession;
   };
 
-  return { handleConnection, close, room, canAccept };
+  /** Nome e login de quem está (ou esteve há pouco) na sala. */
+  const identify = (peerId: string) => known.get(peerId);
+
+  return { handleConnection, close, room, canAccept, identify };
 }

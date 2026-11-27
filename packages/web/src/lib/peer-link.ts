@@ -1,5 +1,15 @@
-import type { SignalData } from '@screenshare/shared';
+import type { CandidateCounts, ConnectionReport, SignalData } from '@screenshare/shared';
 import { downscaleFactor } from './capture';
+
+/** Relato de diagnóstico de uma conexão (o dono completa quem relata e sobre quem). */
+export type LinkReport = Omit<ConnectionReport, 'self' | 'peer'>;
+
+/** Momentos (ms desde a criação) em que uma conexão ainda não estabelecida é relatada. */
+export const SLOW_REPORT_MS: readonly number[] = [15_000, 60_000];
+/** Desfazer uma conexão mais nova que isto não é relatado (entrada e saída normais). */
+const ABANDONED_MIN_MS = 3_000;
+/** Teto por conexão, para um ciclo de falhas não encher o log. */
+const MAX_REPORTS_PER_LINK = 12;
 
 /** Estado de conexão com um peer, como mostrado na UI. */
 export type PeerStatus = 'connecting' | 'p2p' | 'relay' | 'failed';
@@ -19,9 +29,15 @@ export interface PeerLinkDeps {
   onRemoteStream: (stream: MediaStream | null) => void;
   /** A conexão não se recupera sozinha: o dono deve recriá-la. */
   onBroken: () => void;
+  /** Relato para o log do servidor. */
+  onReport?: (report: LinkReport) => void;
+  /** Há servidor TURN entre os iceServers desta conexão. */
+  hasTurn?: boolean;
   getMaxBitrate: () => number;
   /** Tempo em `disconnected`/`failed` antes de pedir recriação. */
   brokenTimeoutMs: number;
+  /** Prazo para uma tentativa conectar antes de pedir recriação; 0 desativa. */
+  connectTimeoutMs: number;
   /** Período do getStats() para detectar P2P vs relay; 0 desativa a repetição. */
   statsIntervalMs: number;
 }
@@ -42,6 +58,12 @@ export interface ConnectionInfo {
 }
 
 const CANDIDATE_KINDS: readonly CandidateKind[] = ['host', 'srflx', 'prflx', 'relay'];
+const noCandidates = (): CandidateCounts => ({ host: 0, srflx: 0, prflx: 0, relay: 0 });
+/** Conta o tipo (`typ xxx`) de um candidate; o endereço é ignorado. */
+function countCandidate(counts: CandidateCounts, candidate: string): void {
+  const kind = / typ (host|srflx|prflx|relay)\b/.exec(candidate)?.[1];
+  if (kind) counts[kind as keyof CandidateCounts] += 1;
+}
 const asKind = (value: unknown): CandidateKind =>
   CANDIDATE_KINDS.find((kind) => kind === value) ?? 'unknown';
 
@@ -94,6 +116,11 @@ export function detectConnectionType(stats: RTCStatsReport): 'p2p' | 'relay' | n
   return describeConnection(stats)?.type ?? null;
 }
 
+const errorName = (error: unknown): string => {
+  const name = error instanceof Error ? error.name : '';
+  return /^[A-Za-z]{1,40}$/.test(name) ? name : 'Error';
+};
+
 /**
  * Uma `RTCPeerConnection` com um peer, usando Perfect Negotiation (MDN/W3C):
  * colisões de offer são resolvidas pelo lado polite com rollback implícito.
@@ -115,8 +142,20 @@ export class PeerLink {
   private senders: RTCRtpSender[] = [];
   private remoteStream: MediaStream | null = null;
   private brokenTimer: ReturnType<typeof setTimeout> | undefined;
+  private connectTimer: ReturnType<typeof setTimeout> | undefined;
   private statsTimer: ReturnType<typeof setInterval> | undefined;
   private lastConnection = '';
+
+  // Diagnóstico
+  private readonly createdAt = Date.now();
+  private readonly sent = noCandidates();
+  private readonly received = noCandidates();
+  private readonly iceErrors = new Set<number>();
+  private slowTimers: ReturnType<typeof setTimeout>[] = [];
+  private everConnected = false;
+  private connectedReported = false;
+  private reports = 0;
+  private readonly reportedErrors = new Set<string>();
 
   constructor(deps: PeerLinkDeps) {
     this.deps = deps;
@@ -130,6 +169,7 @@ export class PeerLink {
       // `candidate` nulo marca o fim da coleta; não há nada a enviar.
       const c = event.candidate;
       if (c) {
+        countCandidate(this.sent, c.candidate);
         this.send({
           candidate: {
             candidate: c.candidate,
@@ -141,6 +181,7 @@ export class PeerLink {
       }
     };
     pc.ontrack = (event) => this.handleTrack(event);
+    pc.onicecandidateerror = (event) => this.iceErrors.add(event.errorCode);
     pc.onconnectionstatechange = () => this.handleConnectionState();
     pc.onsignalingstatechange = () => {
       if (pc.signalingState === 'stable') void this.applyBitrate();
@@ -151,6 +192,14 @@ export class PeerLink {
     // assim que o par se conhece, e já deixam uma m-line de vídeo pronta para receber/enviar.
     pc.createDataChannel('ctrl', { negotiated: true, id: 0 });
     pc.addTransceiver('video', { direction: 'recvonly' });
+
+    this.slowTimers = SLOW_REPORT_MS.map((delay) =>
+      setTimeout(() => {
+        if (!this.everConnected) this.report('slow');
+      }, delay),
+    );
+
+    this.armConnectTimeout();
 
     if (deps.statsIntervalMs > 0) {
       this.statsTimer = setInterval(() => void this.refreshConnectionType(), deps.statsIntervalMs);
@@ -240,6 +289,7 @@ export class PeerLink {
           this.sendLocalDescription();
         }
       } else if (data.candidate) {
+        countCandidate(this.received, data.candidate.candidate);
         try {
           await pc.addIceCandidate(data.candidate);
         } catch (error) {
@@ -249,6 +299,14 @@ export class PeerLink {
       }
     } catch (error) {
       console.error(`[peer ${this.deps.peerId}] erro tratando signal:`, error);
+      this.reportError(error);
+    }
+  }
+
+  /** A conexão vai ser desfeita sem nunca ter funcionado (F5 ou saída de um dos lados). */
+  reportAbandoned(): void {
+    if (!this.everConnected && Date.now() - this.createdAt >= ABANDONED_MIN_MS) {
+      this.report('abandoned');
     }
   }
 
@@ -256,17 +314,63 @@ export class PeerLink {
     if (this.closed) return;
     this.closed = true;
     clearTimeout(this.brokenTimer);
+    clearTimeout(this.connectTimer);
     clearInterval(this.statsTimer);
+    this.slowTimers.forEach((timer) => clearTimeout(timer));
     const pc = this.pc;
     pc.onnegotiationneeded = null;
     pc.onicecandidate = null;
     pc.ontrack = null;
+    pc.onicecandidateerror = null;
     pc.onconnectionstatechange = null;
     pc.onsignalingstatechange = null;
     pc.close();
   }
 
   // -------------------------------------------------------------------------
+
+  private report(event: LinkReport['event'], extra: Pick<LinkReport, 'path' | 'error'> = {}): void {
+    if (this.closed || this.reports >= MAX_REPORTS_PER_LINK) return;
+    this.reports += 1;
+    const pc = this.pc;
+    this.deps.onReport?.({
+      event,
+      gen: this.gen,
+      ms: Math.max(0, Math.round(Date.now() - this.createdAt)),
+      connectionState: pc.connectionState ?? 'unknown',
+      iceState: pc.iceConnectionState ?? 'unknown',
+      gatheringState: pc.iceGatheringState ?? 'unknown',
+      signalingState: pc.signalingState ?? 'unknown',
+      remoteDescription: Boolean(pc.remoteDescription),
+      sent: { ...this.sent },
+      received: { ...this.received },
+      iceErrors: [...this.iceErrors].filter((code) => code >= 0 && code <= 999).slice(0, 8),
+      turn: this.deps.hasTurn ?? false,
+      ...extra,
+    });
+  }
+
+  /**
+   * Sem isto uma tentativa que não avança (ex.: resposta perdida) ficaria em "conectando" para
+   * sempre: o navegador só declara `failed` quando a negociação chega a se completar.
+   */
+  private armConnectTimeout(): void {
+    clearTimeout(this.connectTimer);
+    if (this.deps.connectTimeoutMs <= 0) return;
+    this.connectTimer = setTimeout(() => {
+      if (this.pc.connectionState === 'connected') return;
+      this.report('timeout');
+      this.deps.onBroken();
+    }, this.deps.connectTimeoutMs);
+  }
+
+  /** Cada tipo de erro uma vez: repetidos esgotariam o limite de relatos da conexão. */
+  private reportError(error: unknown): void {
+    const name = errorName(error);
+    if (this.reportedErrors.has(name)) return;
+    this.reportedErrors.add(name);
+    this.report('error', { error: name });
+  }
 
   private send(part: Pick<SignalData, 'description' | 'candidate'>): void {
     if (!this.closed) this.deps.sendSignal({ gen: this.gen, ...part });
@@ -285,6 +389,7 @@ export class PeerLink {
       this.sendLocalDescription();
     } catch (error) {
       console.error(`[peer ${this.deps.peerId}] erro criando offer:`, error);
+      this.reportError(error);
     } finally {
       this.makingOffer = false;
     }
@@ -315,16 +420,20 @@ export class PeerLink {
     clearTimeout(this.brokenTimer);
     switch (this.pc.connectionState) {
       case 'connected':
+        this.everConnected = true;
+        clearTimeout(this.connectTimer);
         this.iceRestarted = false;
         this.setStatus('connecting'); // até saber se é P2P ou relay
         void this.refreshConnectionType();
         return;
       case 'disconnected':
         // Costuma se curar sozinho; só recria se persistir.
+        this.report('disconnected');
         this.brokenTimer = setTimeout(() => this.deps.onBroken(), this.deps.brokenTimeoutMs);
         return;
       case 'failed':
         this.setStatus('failed');
+        this.report('failed');
         if (!this.iceRestarted) {
           this.iceRestarted = true;
           this.pc.restartIce(); // dispara negotiationneeded com iceRestart
@@ -333,7 +442,11 @@ export class PeerLink {
         return;
       case 'new':
       case 'connecting':
-        if (this.status === 'failed') this.setStatus('connecting');
+        if (this.status === 'failed') {
+          this.setStatus('connecting');
+          // Nova tentativa (restartIce) depois de uma falha: também tem prazo.
+          this.armConnectTimeout();
+        }
         return;
       case 'closed':
         return;
@@ -346,6 +459,10 @@ export class PeerLink {
       const info = describeConnection(await this.pc.getStats());
       if (!info || this.closed || this.pc.connectionState !== 'connected') return;
       this.setStatus(info.type);
+      if (!this.connectedReported) {
+        this.connectedReported = true;
+        this.report('connected', { path: info });
+      }
       const key = JSON.stringify(info);
       if (key !== this.lastConnection) {
         this.lastConnection = key;

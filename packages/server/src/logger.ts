@@ -1,5 +1,5 @@
-// Logs só de eventos (join/leave/erro). Nunca logar conteúdo de sinalização (SDP contém IPs)
-// nem a URL do upgrade do WS (contém o token).
+// Logs de eventos (join/leave/erro) e do diagnóstico das conexões (estados e contagens). Nunca logar
+// conteúdo de sinalização (SDP contém IPs) nem a URL do upgrade do WS (contém o token).
 export type LogFields = Record<string, unknown>;
 
 export interface Logger {

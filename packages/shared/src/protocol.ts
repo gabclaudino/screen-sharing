@@ -341,6 +341,72 @@ export const iceServersResponseSchema = z.object({
 export type IceServersResponse = z.infer<typeof iceServersResponseSchema>;
 
 // ---------------------------------------------------------------------------
+// API HTTP: POST /api/report (diagnóstico das conexões entre os navegadores)
+// ---------------------------------------------------------------------------
+
+// Só estados, contagens e códigos: nada de SDP nem de endereço IP.
+const rtcStateSchema = z.string().regex(/^[a-z-]{1,24}$/);
+const countSchema = z.number().int().min(0).max(10_000);
+export const candidateCountsSchema = z.strictObject({
+  host: countSchema,
+  srflx: countSchema,
+  prflx: countSchema,
+  relay: countSchema,
+});
+export type CandidateCounts = z.infer<typeof candidateCountsSchema>;
+const candidateKindSchema = z.enum(['host', 'srflx', 'prflx', 'relay', 'unknown']);
+
+export const connectionReportSchema = z.strictObject({
+  // Quem relata e sobre qual conexão.
+  self: peerIdSchema,
+  peer: peerIdSchema,
+  event: z.enum([
+    'connected',
+    // Ainda sem conectar depois de um tempo.
+    'slow',
+    'failed',
+    'disconnected',
+    // Desfeita (F5, saída) antes de chegar a conectar.
+    'abandoned',
+    // Não conectou no tempo limite: vai ser recriada.
+    'timeout',
+    // Erro ao tratar a negociação.
+    'error',
+  ]),
+  gen: z.number().int().min(0).max(1_000_000),
+  // Idade da conexão.
+  ms: z.number().int().min(0).max(604_800_000),
+  connectionState: rtcStateSchema,
+  iceState: rtcStateSchema,
+  gatheringState: rtcStateSchema,
+  signalingState: rtcStateSchema,
+  // false = a resposta do outro lado nunca chegou.
+  remoteDescription: z.boolean(),
+  // Endereços candidatos enviados e recebidos, por tipo.
+  sent: candidateCountsSchema,
+  received: candidateCountsSchema,
+  // Códigos de erro do STUN/TURN (ex.: 401, 701).
+  iceErrors: z.array(z.number().int().min(0).max(999)).max(8),
+  // false = este navegador está sem servidor TURN.
+  turn: z.boolean(),
+  path: z
+    .strictObject({
+      type: z.enum(['p2p', 'relay']),
+      local: candidateKindSchema,
+      remote: candidateKindSchema,
+      relayProtocol: z.enum(['udp', 'tcp', 'tls']).nullable(),
+      ipv6: z.boolean(),
+    })
+    .optional(),
+  // Nome do erro (ex.: InvalidStateError), nunca a mensagem.
+  error: z
+    .string()
+    .regex(/^[A-Za-z]{1,40}$/)
+    .optional(),
+});
+export type ConnectionReport = z.infer<typeof connectionReportSchema>;
+
+// ---------------------------------------------------------------------------
 // Parsing de mensagens brutas (string JSON recebida no WebSocket)
 // ---------------------------------------------------------------------------
 

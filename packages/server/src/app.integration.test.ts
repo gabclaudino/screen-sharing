@@ -1217,3 +1217,66 @@ describe('roleta (WebSocket)', () => {
     expect((await a.closed).code).toBe(1008);
   });
 });
+
+describe('POST /api/report', () => {
+  const counts = { host: 1, srflx: 0, prflx: 0, relay: 0 };
+  const report = (self: string, extra: object = {}) => ({
+    self,
+    peer: '11111111-1111-4111-8111-111111111111',
+    event: 'slow',
+    gen: 0,
+    ms: 15000,
+    connectionState: 'connecting',
+    iceState: 'checking',
+    gatheringState: 'complete',
+    signalingState: 'stable',
+    remoteDescription: true,
+    sent: counts,
+    received: counts,
+    iceErrors: [701],
+    turn: true,
+    ...extra,
+  });
+
+  it('vira uma linha de log com os nomes; só o próprio login, no formato certo', async () => {
+    const lines: [string, string, Record<string, unknown> | undefined][] = [];
+    const running = await startApp(
+      {},
+      {
+        logger: {
+          info: (event, fields) => lines.push(['info', event, fields]),
+          warn: (event, fields) => lines.push(['warn', event, fields]),
+          error: () => undefined,
+        },
+      },
+    );
+    const token = await getToken(running);
+    const client = await TestClient.connect(running, token);
+    const joined = await client.join('Ana');
+    const selfId = joined.type === 'joined' ? joined.selfId : '';
+    const post = (body: unknown, auth = token) =>
+      fetch(`${running.http}/api/report`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${auth}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+    expect((await post(report(selfId))).status).toBe(204);
+    expect(lines).toContainEqual([
+      'warn',
+      'webrtc',
+      expect.objectContaining({ state: 'slow', from: 'Ana', to: '?', iceErrors: [701] }),
+    ]);
+    expect((await post(report(selfId), 'token-falso')).status).toBe(401);
+    expect((await post(report(selfId), await getToken(running))).status).toBe(403);
+    expect((await post(report(selfId, { sdp: 'v=0' }))).status).toBe(400);
+    expect((await post(report(selfId, { error: 'x'.repeat(3000) }))).status).toBe(413);
+    expect((await fetch(`${running.http}/api/report`)).status).toBe(405);
+
+    // Quem acabou de sair ainda consegue relatar (F5), com o nome.
+    client.send({ type: 'leave' });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect((await post(report(selfId, { event: 'abandoned' }))).status).toBe(204);
+    await running.app.close();
+  });
+});

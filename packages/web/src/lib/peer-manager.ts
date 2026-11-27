@@ -1,4 +1,4 @@
-import type { PeerInfo, SignalData } from '@screenshare/shared';
+import type { ConnectionReport, PeerInfo, SignalData } from '@screenshare/shared';
 import { TypedEmitter } from './emitter';
 import { PeerLink, type ConnectionInfo, type PeerStatus } from './peer-link';
 
@@ -10,6 +10,8 @@ export interface PeerManagerEvents {
   status: { peerId: string; status: PeerStatus };
   /** Detalhes do caminho da conexão (P2P/relay, tipos de candidate, protocolo do relay). */
   connection: { peerId: string; info: ConnectionInfo };
+  /** Diagnóstico de uma conexão, para o log do servidor. */
+  report: ConnectionReport;
 }
 
 export interface PeerManagerOptions {
@@ -21,10 +23,20 @@ export interface PeerManagerOptions {
   maxBitrate?: number;
   /** Tempo em disconnected/failed antes de recriar a conexão (padrão 10 s). */
   brokenTimeoutMs?: number;
+  /** Prazo da primeira tentativa de conexão (padrão 20 s); 0 desativa. */
+  connectTimeoutMs?: number;
   statsIntervalMs?: number;
 }
 
 const DEFAULT_MAX_BITRATE = 2_500_000;
+const DEFAULT_CONNECT_TIMEOUT_MS = 20_000;
+/** O lado "polite" espera isto a mais: normalmente só o outro pede a recriação. */
+const POLITE_EXTRA_MS = 10_000;
+/** Cada nova tentativa ganha mais prazo (redes lentas), até este múltiplo do primeiro. */
+const MAX_TIMEOUT_FACTOR = 3;
+
+const isTurn = (server: RTCIceServer): boolean =>
+  [server.urls].flat().some((url) => url.startsWith('turn'));
 
 const defaultCreatePeerConnection = (config: RTCConfiguration): RTCPeerConnection =>
   new RTCPeerConnection(config);
@@ -67,7 +79,13 @@ export class PeerManager extends TypedEmitter<PeerManagerEvents> {
   }
 
   removePeer(peerId: string): void {
+    this.links.get(peerId)?.reportAbandoned();
     this.dropLink(peerId);
+  }
+
+  /** Relata as conexões que ainda não funcionaram (a página vai ser fechada ou recarregada). */
+  reportPending(): void {
+    for (const link of this.links.values()) link.reportAbandoned();
   }
 
   handleSignal(from: string, data: SignalData): void {
@@ -112,12 +130,23 @@ export class PeerManager extends TypedEmitter<PeerManagerEvents> {
   private createLink(peerId: string, gen: number): PeerLink {
     const selfId = this.requireSelf();
     const createPc = this.opts.createPeerConnection ?? defaultCreatePeerConnection;
+    const iceServers = this.opts.getIceServers();
+    // Comparação de strings: determinística e igual nos dois lados.
+    const polite = selfId < peerId;
+    const base = this.opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
+    const connectTimeoutMs =
+      base > 0 ? base * Math.min(gen + 1, MAX_TIMEOUT_FACTOR) + (polite ? POLITE_EXTRA_MS : 0) : 0;
     const link: PeerLink = new PeerLink({
       peerId,
-      // Comparação de strings: determinística e igual nos dois lados.
-      polite: selfId < peerId,
+      polite,
       gen,
-      pc: createPc({ iceServers: this.opts.getIceServers() }),
+      pc: createPc({ iceServers }),
+      hasTurn: iceServers.some(isTurn),
+      onReport: (report) => {
+        if (this.links.get(peerId) === link) {
+          this.emit('report', { self: selfId, peer: peerId, ...report });
+        }
+      },
       sendSignal: (data) => {
         if (!this.opts.sendSignal(peerId, data)) {
           // Sem WS não há como renegociar; a recuperação vem do restartIce/recriação.
@@ -138,6 +167,7 @@ export class PeerManager extends TypedEmitter<PeerManagerEvents> {
       },
       getMaxBitrate: () => this.maxBitrate,
       brokenTimeoutMs: this.opts.brokenTimeoutMs ?? 10_000,
+      connectTimeoutMs,
       statsIntervalMs: this.opts.statsIntervalMs ?? 5_000,
     });
     if (this.localStream) link.setLocalStream(this.localStream);

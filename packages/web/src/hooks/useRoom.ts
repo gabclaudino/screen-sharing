@@ -1,6 +1,7 @@
 import type { ReactionEmoji, RouletteCommand } from '@screenshare/shared';
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 import { isSessionValid, type Session } from '../lib/auth';
+import { sendConnectionReport } from '../lib/connection-report';
 import { IceServerStore } from '../lib/ice';
 import { PeerManager } from '../lib/peer-manager';
 import { createInitialRoomState, roomReducer, type RoomState } from '../lib/room-state';
@@ -122,7 +123,12 @@ export function useRoom({
       manager.on('status', ({ peerId, status }) =>
         dispatch({ type: 'peer-status', id: peerId, status }),
       ),
+      manager.on('report', (report) => sendConnectionReport(sessionRef.current, report)),
     ];
+
+    // F5 ou fechar a aba com uma conexão ainda travada: é o relato mais útil.
+    const reportPending = () => manager.reportPending();
+    window.addEventListener('pagehide', reportPending);
 
     // Busca os iceServers (STUN + TURN) antes de conectar: nenhuma conexão P2P pode nascer sem
     // eles. Se a busca falhar, segue só com STUN e a UI avisa (state.iceFallback).
@@ -135,6 +141,7 @@ export function useRoom({
 
     return () => {
       cancelled = true;
+      window.removeEventListener('pagehide', reportPending);
       ice.stop();
       // Desinscreve antes de desconectar: o `closed` do disconnect() não deve chegar à UI.
       off.forEach((unsubscribe) => unsubscribe());
