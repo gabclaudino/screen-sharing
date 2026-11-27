@@ -189,6 +189,7 @@ Uso privado entre amigos, então sem sistema de contas.
 - Limite de tamanho de mensagem WS (64 KB) e de tamanho de nome (30 chars).
 - Cabeçalhos: `Content-Security-Policy` restritiva (base: `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self' wss://<host de ALLOWED_ORIGIN>; frame-ancestors 'none'; base-uri 'self'; form-action 'self'` — listar `wss://` explicitamente porque alguns navegadores não tratam `'self'` como cobrindo WS), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Permissions-Policy: display-capture=(self)`.
 - Sem logs de conteúdo de sinalização (SDP contém IPs); logar apenas eventos (join/leave/erro, com o nome exibido) e o diagnóstico das conexões.
+- **Fotos de perfil:** `GET /api/photos` (token Bearer) lista, a cada pedido, os arquivos `perfil-N.{jpg,jpeg,png,webp}` de `PHOTOS_DIR`; `/fotos/*` é servido primeiro dessa pasta (depois do build). O cliente busca a lista ao entrar, ao abrir o seletor e quando alguém troca de foto.
 - **Tempo limite de conexão:** uma tentativa que não conecta em 20 s (30 s no lado polite, para normalmente só um lado agir) é recriada com `reset`; o prazo cresce a cada geração (20 → 40 → 60 s). Vale também para a nova tentativa após uma falha.
 - **Diagnóstico das conexões:** cada navegador envia `POST /api/report` (token Bearer; corpo ≤ 2 KB; 120 por minuto por login; só sobre os próprios peers) quando uma conexão conecta, segue sem conectar aos 15 s e 60 s, estoura o tempo limite, falha, cai, dá erro de negociação (cada tipo uma vez) ou é desfeita sem nunca ter funcionado (após 3 s; inclui F5), no máximo 12 por conexão. Vira uma linha `webrtc` no log com os nomes, estados, contagem de candidates por tipo, códigos de erro do STUN/TURN e se havia TURN; nunca SDP nem IP.
 - **Endurecimento (fase 8):**
@@ -243,6 +244,7 @@ LOGIN_RATE_MAX=10              # tentativas de login por janela
 LOGIN_RATE_WINDOW_MIN=10
 WS_MSG_RATE_PER_SEC=400
 STATIC_DIR=packages/web/dist
+PHOTOS_DIR=packages/web/public/fotos
 ICE_PROVIDER=cloudflare        # cloudflare | metered | none
 ICE_CREDENTIAL_TTL_SEC=86400
 CLOUDFLARE_TURN_KEY_ID=

@@ -34,6 +34,15 @@ describe('loadConfig', () => {
     });
   });
 
+  it('a pasta de fotos padrão é public/fotos', () => {
+    const config = loadConfig({
+      ALLOWED_ORIGIN: 'http://localhost:3000',
+      ACCESS_PASSWORD: 'senha-de-teste-123',
+      SESSION_SECRET: 's'.repeat(40),
+    });
+    expect(config.photosDir.endsWith(path.join('packages', 'web', 'public', 'fotos'))).toBe(true);
+  });
+
   it('resolve STATIC_DIR relativo a partir da raiz do repositório', () => {
     const config = loadConfig(valid);
     expect(path.isAbsolute(config.staticDir)).toBe(true);

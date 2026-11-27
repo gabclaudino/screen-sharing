@@ -29,6 +29,8 @@ export interface Config {
   loginRateWindowMs: number;
   wsMsgRatePerSec: number;
   staticDir: string;
+  /** Pasta das fotos, lida com o servidor ligado (copiar um arquivo já basta). */
+  photosDir: string;
   ice: {
     provider: IceProviderName;
     credentialTtlSec: number;
@@ -81,6 +83,7 @@ const envSchema = z
     // IPv6, STUN e porta de relay): com vários peers passa de 200 mensagens no primeiro segundo.
     WS_MSG_RATE_PER_SEC: positiveInt(400),
     STATIC_DIR: z.string().min(1).default('packages/web/dist'),
+    PHOTOS_DIR: z.string().min(1).default('packages/web/public/fotos'),
     ICE_PROVIDER: z.enum(['cloudflare', 'metered', 'none']).default('none'),
     ICE_CREDENTIAL_TTL_SEC: positiveInt(86400, 60, 172800),
     CLOUDFLARE_TURN_KEY_ID: z.string().optional(),
@@ -165,7 +168,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     loginRateMax: e.LOGIN_RATE_MAX,
     loginRateWindowMs: e.LOGIN_RATE_WINDOW_MIN * 60_000,
     wsMsgRatePerSec: e.WS_MSG_RATE_PER_SEC,
-    staticDir: path.isAbsolute(e.STATIC_DIR) ? e.STATIC_DIR : path.resolve(repoRoot, e.STATIC_DIR),
+    // Caminhos relativos partem da raiz do repositório.
+    staticDir: path.resolve(repoRoot, e.STATIC_DIR),
+    photosDir: path.resolve(repoRoot, e.PHOTOS_DIR),
     ice: {
       provider: e.ICE_PROVIDER,
       credentialTtlSec: e.ICE_CREDENTIAL_TTL_SEC,

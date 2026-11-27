@@ -43,8 +43,18 @@ async function fileStats(target: string) {
  * Serve o build do React: arquivos com hash em /assets/ ficam em cache longo, o resto
  * (incluindo index.html) não é cacheado. Rotas sem extensão caem no index.html (SPA).
  */
-export function createStaticHandler(rootDir: string) {
+export function createStaticHandler(rootDir: string, photosDir?: string) {
   const root = path.resolve(rootDir);
+  const photos = photosDir === undefined ? undefined : path.resolve(photosDir);
+
+  // `/fotos/...` sai primeiro da pasta de fotos, para um arquivo recém-copiado valer sem build.
+  async function findPhoto(relative: string) {
+    if (!photos || !relative.startsWith('fotos/')) return undefined;
+    const target = path.resolve(photos, relative.slice('fotos/'.length));
+    if (!target.startsWith(photos + path.sep)) return undefined;
+    const stats = await fileStats(target);
+    return stats ? { target, stats } : undefined;
+  }
 
   return async (req: IncomingMessage, res: ServerResponse, pathname: string): Promise<void> => {
     let decoded: string;
@@ -67,7 +77,9 @@ export function createStaticHandler(rootDir: string) {
       return;
     }
 
-    let stats = await fileStats(target);
+    const photo = await findPhoto(relative);
+    if (photo) target = photo.target;
+    let stats = photo?.stats ?? (await fileStats(target));
     if (!stats) {
       if (path.extname(relative) !== '') {
         sendText(res, 404, 'Not Found');

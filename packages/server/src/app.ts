@@ -20,6 +20,7 @@ import {
   verifyPassword,
   verifyToken,
 } from './security';
+import { listProfilePhotos } from './photos';
 import { createStaticHandler } from './static';
 import { createIceProvider, IceService } from './ice';
 
@@ -105,7 +106,7 @@ export function createApp(config: Config, options: AppOptions = {}) {
     logger,
     ...(options.iceCacheMs === undefined ? {} : { cacheMs: options.iceCacheMs }),
   });
-  const serveStatic = createStaticHandler(config.staticDir);
+  const serveStatic = createStaticHandler(config.staticDir, config.photosDir);
   const loginLimiter = new RateLimiter(config.loginRateMax, config.loginRateWindowMs);
   const reportLimiter = new RateLimiter(REPORTS_PER_MINUTE, 60_000);
   const sweeper = setInterval(() => {
@@ -179,6 +180,17 @@ export function createApp(config: Config, options: AppOptions = {}) {
     }
     // Nunca 5xx por falha do provedor: o IceService já cai para só STUN.
     sendJson(res, 200, { iceServers: await iceService.getIceServers() });
+  }
+
+  // Lida a cada pedido: uma foto copiada para a pasta aparece sem reiniciar nem recompilar.
+  async function handlePhotos(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const header = req.headers.authorization;
+    const token = header?.startsWith('Bearer ') ? header.slice(7).trim() : '';
+    if (!token || !verifyToken(token, signingSecret)) {
+      sendJson(res, 401, { error: 'UNAUTHORIZED' });
+      return;
+    }
+    sendJson(res, 200, { photos: await listProfilePhotos(config.photosDir) });
   }
 
   // O cliente pergunta, antes de reconectar depois de uma queda, se o login ainda vale (200) ou
@@ -263,6 +275,15 @@ export function createApp(config: Config, options: AppOptions = {}) {
         return;
       }
       await handleIce(req, res);
+      return;
+    }
+    if (pathname === '/api/photos') {
+      if (req.method !== 'GET') {
+        res.setHeader('Allow', 'GET');
+        sendJson(res, 405, { error: 'METHOD_NOT_ALLOWED' });
+        return;
+      }
+      await handlePhotos(req, res);
       return;
     }
     if (pathname === '/api/session') {

@@ -341,6 +341,21 @@ export const iceServersResponseSchema = z.object({
 export type IceServersResponse = z.infer<typeof iceServersResponseSchema>;
 
 // ---------------------------------------------------------------------------
+// API HTTP: GET /api/photos (fotos de perfil que estão na pasta do servidor)
+// ---------------------------------------------------------------------------
+
+export const MAX_PROFILE_PHOTOS = 200;
+/** Nome de um arquivo de foto de perfil: `perfil-N` + extensão de imagem. */
+export const PROFILE_PHOTO_FILE = /^perfil-(\d{1,4})\.(?:jpe?g|png|webp)$/i;
+
+export const profilePhotosResponseSchema = z.object({
+  photos: z
+    .array(z.object({ id: avatarIdSchema, file: z.string().regex(PROFILE_PHOTO_FILE) }))
+    .max(MAX_PROFILE_PHOTOS),
+});
+export type ProfilePhotosResponse = z.infer<typeof profilePhotosResponseSchema>;
+
+// ---------------------------------------------------------------------------
 // API HTTP: POST /api/report (diagnóstico das conexões entre os navegadores)
 // ---------------------------------------------------------------------------
 

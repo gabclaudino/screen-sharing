@@ -1280,3 +1280,31 @@ describe('POST /api/report', () => {
     await running.app.close();
   });
 });
+
+describe('fotos de perfil da pasta', () => {
+  it('lista com login e entrega um arquivo copiado depois de o servidor ligar', async () => {
+    const photosDir = mkdtempSync(path.join(tmpdir(), 'screenshare-photos-'));
+    const running = await startApp({ PHOTOS_DIR: photosDir });
+    const token = await getToken(running);
+    const list = async (auth = token) =>
+      fetch(`${running.http}/api/photos`, { headers: { Authorization: `Bearer ${auth}` } });
+
+    expect(await (await list()).json()).toEqual({ photos: [] });
+    writeFileSync(path.join(photosDir, 'perfil-19.jpg'), 'imagem');
+    expect(await (await list()).json()).toEqual({
+      photos: [{ id: 'perfil-19', file: 'perfil-19.jpg' }],
+    });
+    const file = await fetch(`${running.http}/fotos/perfil-19.jpg`);
+    expect([file.status, file.headers.get('content-type'), await file.text()]).toEqual([
+      200,
+      'image/jpeg',
+      'imagem',
+    ]);
+    expect((await list('token-falso')).status).toBe(401);
+    // não escapa da pasta
+    expect((await fetch(`${running.http}/fotos/..%2F..%2Fpackage.json`)).status).toBe(404);
+
+    await running.app.close();
+    rmSync(photosDir, { recursive: true, force: true });
+  });
+});

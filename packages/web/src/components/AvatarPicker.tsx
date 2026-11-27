@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react';
-import { PROFILE_PHOTOS } from '../lib/profile-photos';
+import { useContext, useEffect, useRef } from 'react';
+import { ProfilePhotosContext } from '../hooks/useProfilePhotos';
 import { Avatar } from './Avatar';
 
 interface Props {
@@ -13,6 +13,7 @@ interface Props {
 /** Seletor da foto de perfil, num <dialog> nativo (Esc ou clique fora fecham). */
 export function AvatarPicker({ open, current, onSelect, onClose }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
+  const photos = useContext(ProfilePhotosContext);
 
   useEffect(() => {
     const dialog = ref.current;
@@ -51,7 +52,7 @@ export function AvatarPicker({ open, current, onSelect, onClose }: Props) {
               <span>Sem foto</span>
             </button>
           </li>
-          {PROFILE_PHOTOS.map((photo) => (
+          {photos.map((photo) => (
             <li key={photo.id}>
               <button
                 type="button"

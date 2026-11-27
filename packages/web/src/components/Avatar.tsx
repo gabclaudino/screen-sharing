@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useContext, useState } from 'react';
+import { ProfilePhotosContext } from '../hooks/useProfilePhotos';
 import { findProfilePhoto } from '../lib/profile-photos';
 import { NoPhotoIcon } from './icons';
 
@@ -13,7 +14,7 @@ interface Props {
 
 /** Foto de perfil redonda. Cai na imagem padrão se não há foto, o id é desconhecido ou o arquivo falta. */
 export function Avatar({ photoId, name, size = 32 }: Props) {
-  const photo = findProfilePhoto(photoId);
+  const photo = findProfilePhoto(photoId, useContext(ProfilePhotosContext));
   // Arquivo que não carregou (as fotos não vão no git): mostra o padrão em vez de imagem quebrada.
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const showPhoto = photo !== undefined && photo.src !== failedSrc;
