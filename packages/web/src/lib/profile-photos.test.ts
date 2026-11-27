@@ -15,9 +15,9 @@ describe('PROFILE_PHOTOS', () => {
 });
 
 describe('fotos escolhíveis', () => {
-  it('são as 17 enviadas (perfil-1 a perfil-17), na ordem', () => {
+  it('são as 18 enviadas (perfil-1 a perfil-18), na ordem', () => {
     expect(PROFILE_PHOTOS.map((p) => p.id)).toEqual(
-      Array.from({ length: 17 }, (_, i) => `perfil-${i + 1}`),
+      Array.from({ length: 18 }, (_, i) => `perfil-${i + 1}`),
     );
   });
 

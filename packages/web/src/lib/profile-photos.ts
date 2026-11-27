@@ -31,6 +31,7 @@ export const PROFILE_PHOTOS: readonly ProfilePhoto[] = [
   { id: 'perfil-15', src: '/fotos/perfil-15.png', label: 'Foto 15' },
   { id: 'perfil-16', src: '/fotos/perfil-16.png', label: 'Foto 16' },
   { id: 'perfil-17', src: '/fotos/perfil-17.png', label: 'Foto 17' },
+  { id: 'perfil-18', src: '/fotos/perfil-18.jpg', label: 'Foto 18' },
 ];
 
 /** A foto de um id; `undefined` para sem id ou um id que esta versão do app não conhece. */
